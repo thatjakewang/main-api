@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import tesla
+from app.routers import tesla, life
 
 app = FastAPI(
     title="My Tesla Analytics API",
@@ -29,4 +29,10 @@ app.include_router(
     tesla.router,
     prefix="/api/tesla",
     tags=["Tesla"],
+)
+
+app.include_router(
+    life.router,
+    prefix="/api/life",
+    tags=["Life"],
 )
