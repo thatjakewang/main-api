@@ -64,3 +64,32 @@ def create_daily_expense(
             "payment_method": payload.payment_method,
         },
     }
+
+@router.get("/expenses/recent")
+def get_recent_daily_expenses(db: Session = Depends(get_db)):
+    query = text("""
+        SELECT
+            id,
+            date,
+            category,
+            amount,
+            payment_method,
+            created_at
+        FROM daily_expenses
+        ORDER BY date DESC, created_at DESC
+        LIMIT 10
+    """)
+
+    rows = db.execute(query).mappings().all()
+
+    return [
+        {
+            "id": row["id"],
+            "date": row["date"].isoformat(),
+            "category": row["category"],
+            "amount": row["amount"],
+            "payment_method": row["payment_method"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
