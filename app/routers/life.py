@@ -93,3 +93,23 @@ def get_recent_daily_expenses(db: Session = Depends(get_db)):
         }
         for row in rows
     ]
+
+@router.get("/expenses/summary")
+def get_daily_expense_summary(db: Session = Depends(get_db)):
+    query = text("""
+        SELECT
+            TO_CHAR(DATE_TRUNC('month', CURRENT_DATE), 'YYYY-MM') AS month,
+            COALESCE(SUM(amount), 0) AS total_amount,
+            COUNT(*) AS record_count
+        FROM daily_expenses
+        WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
+          AND date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+    """)
+
+    row = db.execute(query).mappings().one()
+
+    return {
+        "month": row["month"],
+        "total_amount": int(row["total_amount"] or 0),
+        "record_count": int(row["record_count"] or 0),
+    }
