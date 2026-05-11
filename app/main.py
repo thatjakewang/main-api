@@ -25,6 +25,16 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "tesla-api",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 app.include_router(
     tesla.router,
     prefix="/api/tesla",
