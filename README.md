@@ -54,6 +54,8 @@ API docs available at http://localhost:8000/docs after startup.
 | POST | `/api/life/expenses` | Create a daily expense |
 | GET | `/api/life/expenses/daily-ai-summary` | Create an AI daily expense summary JSON response |
 | GET | `/api/life/expenses/daily-ai-summary/message` | Create an AI daily expense summary plain text message |
+| GET | `/api/life/expenses/monthly-ai-summary` | Create an AI monthly expense summary JSON response |
+| GET | `/api/life/expenses/monthly-ai-summary/message` | Create an AI monthly expense summary plain text message |
 
 ### POST `/api/tesla/charging-records`
 
@@ -76,9 +78,9 @@ API docs available at http://localhost:8000/docs after startup.
 }
 ```
 
-### GET `/api/life/expenses/daily-ai-summary`
+### GET `/api/life/expenses/monthly-ai-summary`
 
-Returns a short Traditional Chinese message for iPhone Shortcuts to send via iMessage.
+Returns a short Traditional Chinese monthly expense analysis for iPhone Shortcuts to send via iMessage.
 
 Headers:
 
@@ -89,7 +91,7 @@ x-api-key: your_api_key
 Optional query params:
 
 ```text
-target_date=2026-05-11
+target_month=2026-05
 ```
 
 Response:
@@ -97,11 +99,11 @@ Response:
 ```json
 {
   "status": "success",
-  "date": "2026-05-11",
-  "message": "2026-05-11 花費總覽...",
+  "month": "2026-05",
+  "message": "2026-05 本月花費分析...",
   "data": {
-    "total_amount": 520,
-    "record_count": 3,
+    "total_amount": 1401,
+    "record_count": 15,
     "categories": []
   }
 }
@@ -110,7 +112,7 @@ Response:
 For the simplest iPhone Shortcuts setup, use the plain text endpoint:
 
 1. Add `Get Contents of URL`.
-2. URL: `https://your-domain.com/api/life/expenses/daily-ai-summary/message`.
+2. URL: `https://your-domain.com/api/life/expenses/monthly-ai-summary/message`.
 3. Method: `GET`.
 4. Headers: `x-api-key` = your shortcut API key.
 5. Use `Send Message` to send the URL content via iMessage.
