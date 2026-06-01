@@ -11,7 +11,7 @@ A personal Tesla cost-tracking backend that records charging sessions and car ex
 
 ## Environment Variables
 
-Create a `.env` file with the following:
+All configuration is loaded via `pydantic-settings` from `.env` (or environment variables). Create a `.env` file with the following (defaults exist for some):
 
 ```env
 DATABASE_URL=postgresql://user:password@host:port/dbname

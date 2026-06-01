@@ -1,30 +1,29 @@
-import os
+from datetime import date
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, Header, HTTPException
-from app.config import get_settings
-from datetime import date
-from pydantic import BaseModel
 
+from app.config import get_settings
 from app.database import get_db
+from app.dependencies import verify_shortcut_api_key
 
 router = APIRouter()
 settings = get_settings()
 
-def verify_shortcut_api_key(x_api_key: str = Header(...)):
-    if x_api_key != settings.shortcut_api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 class ChargingRecordCreate(BaseModel):
     charge_date: date
     provider: str
-    amount: int
-    kwh: float
+    amount: int = Field(ge=0)
+    kwh: float = Field(ge=0)
+
 
 class CarExpenseCreate(BaseModel):
     date: date
     item: str
-    amount: int
+    amount: int = Field(ge=0)
 
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
@@ -51,11 +50,7 @@ def get_stats(db: Session = Depends(get_db)):
     total_cost = car_expense_total + charging_cost
     avg_price_per_kwh = round(charging_cost / energy_kwh, 2) if energy_kwh else 0
 
-    try:
-        odometer_km = int(os.getenv("TESLA_ODOMETER_KM", "21471"))
-    except ValueError:
-        odometer_km = 21471
-
+    odometer_km = settings.tesla_odometer_km
     cost_per_km = round(total_cost / odometer_km, 2) if odometer_km else 0
 
     return {

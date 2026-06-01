@@ -2,36 +2,25 @@ from datetime import date, datetime
 import json
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import verify_shortcut_api_key
 
 router = APIRouter()
 settings = get_settings()
 
 
-def verify_shortcut_api_key(x_api_key: str = Header(...)):
-    if x_api_key != settings.shortcut_api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-
 class DailyExpenseCreate(BaseModel):
     date: date
     category: str
-    amount: int
+    amount: int = Field(ge=0)
     payment_method: str | None = None
-
-
-def format_twd(amount: int) -> str:
-    if amount < 0:
-        return f"-NT${abs(amount):,}"
-
-    return f"NT${amount:,}"
 
 
 def parse_money_setting(value: str | None) -> int | None:
@@ -78,122 +67,6 @@ def get_monthly_budget_context(total_amount: int) -> dict:
     }
 
 
-def format_category_name(category: str) -> str:
-    category_names = {
-        "drinks": "飲料",
-        "food": "食物",
-        "parking": "停車",
-        "shopping": "購物",
-        "subscription": "訂閱",
-        "workout": "運動",
-    }
-
-    return category_names.get(category.lower(), category)
-
-
-def build_spending_advice(
-    target_date: date,
-    total_amount: int,
-    categories: list[dict],
-    recent_days: list[dict] | None = None,
-) -> str:
-    if total_amount <= 0 or not categories:
-        return "今天還沒有支出紀錄，晚點有記帳後我再幫你看哪一類偏高。"
-
-    sorted_categories = sorted(
-        categories,
-        key=lambda category: int(category["total_amount"] or 0),
-        reverse=True,
-    )
-    top_category = sorted_categories[0]
-    top_name = format_category_name(top_category["category"])
-    top_amount = int(top_category["total_amount"] or 0)
-    top_share = round(top_amount / total_amount * 100)
-
-    advice_parts = [
-        f"今天最高是{top_name} {format_twd(top_amount)}，佔總花費 {top_share}%。"
-    ]
-
-    category_totals = {
-        category["category"].lower(): int(category["total_amount"] or 0)
-        for category in sorted_categories
-    }
-    food_drinks_amount = category_totals.get("food", 0) + category_totals.get("drinks", 0)
-    if food_drinks_amount > 0:
-        food_drinks_share = round(food_drinks_amount / total_amount * 100)
-        if food_drinks_share >= 40:
-            advice_parts.append(
-                f"食物和飲料合計 {format_twd(food_drinks_amount)}，佔 {food_drinks_share}%，"
-                "這塊比單一分類更值得先控管。"
-            )
-
-    category_key = top_category["category"].lower()
-    if category_key == "food":
-        advice_parts.append("食物佔比偏高時，明天可以先設定餐費上限，或把一餐改成較固定預算。")
-    elif category_key == "drinks":
-        advice_parts.append("飲料花費偏高，明天先少買一杯或改自備，會是最容易省下來的地方。")
-    elif category_key == "subscription":
-        advice_parts.append("訂閱扣款拉高今日支出，月底前可以檢查一次是否還有低使用率的服務。")
-    elif category_key == "shopping":
-        advice_parts.append("購物是今天最大支出，非急用品可以先放 24 小時再決定。")
-    elif category_key == "parking":
-        advice_parts.append("停車費佔比高時，可以留意下次是否有較便宜的停車點或改短停留時間。")
-    else:
-        advice_parts.append(f"如果想壓低今天這種支出，先從{top_name}設定小額上限最有效。")
-
-    previous_days = [
-        day
-        for day in recent_days or []
-        if day["date"] != target_date.isoformat() and int(day["total_amount"] or 0) > 0
-    ]
-    if previous_days:
-        average_amount = round(
-            sum(int(day["total_amount"] or 0) for day in previous_days) / len(previous_days)
-        )
-        if total_amount >= average_amount * 1.2:
-            advice_parts.append(f"今天比近幾天平均 {format_twd(average_amount)} 高，建議明天先壓低最大分類。")
-        elif total_amount <= average_amount * 0.8:
-            advice_parts.append(f"今天低於近幾天平均 {format_twd(average_amount)}，目前節奏不錯。")
-
-    return " ".join(advice_parts)
-
-
-def build_daily_expense_message(
-    target_date: date,
-    total_amount: int,
-    record_count: int,
-    categories: list[dict],
-    recent_days: list[dict] | None = None,
-) -> str:
-    sorted_categories = sorted(
-        categories,
-        key=lambda category: int(category["total_amount"] or 0),
-        reverse=True,
-    )
-    category_lines = "\n".join(
-        f"- {format_category_name(category['category'])}: {format_twd(category['total_amount'])}"
-        for category in sorted_categories
-    )
-
-    if not category_lines:
-        category_lines = "- 今天尚無支出紀錄"
-
-    advice = build_spending_advice(
-        target_date,
-        total_amount,
-        sorted_categories,
-        recent_days,
-    )
-
-    return (
-        f"{target_date.isoformat()} 花費總覽\n"
-        f"今日總花費：{format_twd(total_amount)}\n"
-        f"紀錄筆數：{record_count}\n\n"
-        f"分類：\n{category_lines}\n\n"
-        f"建議：{advice}"
-    )
-
-
 def create_openai_client():
     if not settings.openai_api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
@@ -236,123 +109,6 @@ def get_next_month_start(month_start: date) -> date:
         return date(month_start.year + 1, 1, 1)
 
     return date(month_start.year, month_start.month + 1, 1)
-
-
-def build_monthly_spending_advice(
-    month_label: str,
-    total_amount: int,
-    record_count: int,
-    categories: list[dict],
-    daily_totals: list[dict],
-    budget_context: dict | None = None,
-) -> str:
-    if total_amount <= 0 or not categories:
-        return "本月目前沒有支出紀錄，先累積幾筆後我再幫你看哪一類偏高。"
-
-    sorted_categories = sorted(
-        categories,
-        key=lambda category: int(category["total_amount"] or 0),
-        reverse=True,
-    )
-    top_category = sorted_categories[0]
-    top_name = format_category_name(top_category["category"])
-    top_amount = int(top_category["total_amount"] or 0)
-    top_share = round(top_amount / total_amount * 100)
-    spending_days = len([day for day in daily_totals if int(day["total_amount"] or 0) > 0])
-    average_spending_day = round(total_amount / spending_days) if spending_days else total_amount
-
-    advice_parts = [
-        f"{month_label} 目前最高是{top_name} {format_twd(top_amount)}，佔本月 {top_share}%。"
-    ]
-
-    category_totals = {
-        category["category"].lower(): int(category["total_amount"] or 0)
-        for category in sorted_categories
-    }
-    food_drinks_amount = category_totals.get("food", 0) + category_totals.get("drinks", 0)
-    if food_drinks_amount:
-        food_drinks_share = round(food_drinks_amount / total_amount * 100)
-        if food_drinks_share >= 35:
-            advice_parts.append(
-                f"食物和飲料合計 {format_twd(food_drinks_amount)}，佔 {food_drinks_share}%，"
-                "本月最值得先控管。"
-            )
-
-    if average_spending_day:
-        advice_parts.append(f"有支出日平均約 {format_twd(average_spending_day)}。")
-
-    disposable_used_ratio = None
-    if budget_context:
-        disposable_used_ratio = budget_context.get("disposable_used_ratio")
-
-    if disposable_used_ratio is not None:
-        if disposable_used_ratio >= 90:
-            advice_parts.append("目前已接近或超過可支配金額，接下來建議只保留必要支出。")
-        elif disposable_used_ratio >= 70:
-            advice_parts.append("目前可支配金額使用率偏高，月底前要開始壓低非必要消費。")
-        elif disposable_used_ratio <= 30:
-            advice_parts.append("目前可支配金額使用率偏低，整體支出壓力不高。")
-
-    category_key = top_category["category"].lower()
-    if category_key == "food":
-        advice_parts.append("接下來可以先設定每週餐費上限。")
-    elif category_key == "drinks":
-        advice_parts.append("飲料如果每天累積，月底會很明顯，建議先減少高單價飲品。")
-    elif category_key == "subscription":
-        advice_parts.append("訂閱類可以月底固定檢查一次，砍掉低使用率服務。")
-    elif category_key == "shopping":
-        advice_parts.append("購物類先用 24 小時冷靜期，避免月底被零碎消費墊高。")
-    else:
-        advice_parts.append(f"想降低本月支出，先從{top_name}設定上限。")
-
-    return " ".join(advice_parts)
-
-
-def build_monthly_expense_message(
-    month_label: str,
-    total_amount: int,
-    record_count: int,
-    categories: list[dict],
-    daily_totals: list[dict],
-    budget_context: dict | None = None,
-) -> str:
-    sorted_categories = sorted(
-        categories,
-        key=lambda category: int(category["total_amount"] or 0),
-        reverse=True,
-    )
-    category_lines = "\n".join(
-        f"- {format_category_name(category['category'])}: {format_twd(category['total_amount'])}"
-        for category in sorted_categories
-    )
-    if not category_lines:
-        category_lines = "- 本月尚無支出紀錄"
-
-    spending_days = len([day for day in daily_totals if int(day["total_amount"] or 0) > 0])
-    advice = build_monthly_spending_advice(
-        month_label,
-        total_amount,
-        record_count,
-        sorted_categories,
-        daily_totals,
-        budget_context,
-    )
-    budget_lines = ""
-    if budget_context and budget_context.get("disposable_used_ratio") is not None:
-        budget_lines = (
-            f"已用可支配金額：{budget_context['disposable_used_ratio']}%\n"
-            f"剩餘可支配：{format_twd(budget_context['disposable_remaining'])}\n"
-        )
-
-    return (
-        f"{month_label} 本月花費分析\n"
-        f"本月總花費：{format_twd(total_amount)}\n"
-        f"{budget_lines}"
-        f"紀錄筆數：{record_count}\n"
-        f"有支出天數：{spending_days}\n\n"
-        f"分類：\n{category_lines}\n\n"
-        f"建議：{advice}"
-    )
 
 
 @router.get("/health")
@@ -427,39 +183,50 @@ def get_recent_daily_expenses(db: Session = Depends(get_db)):
 
 @router.get("/expenses/summary")
 def get_daily_expense_summary(db: Session = Depends(get_db)):
+    month_start = get_month_start()
+    next_month_start = get_next_month_start(month_start)
+    month_label = month_start.strftime("%Y-%m")
+
     query = text("""
         SELECT
-            TO_CHAR(DATE_TRUNC('month', CURRENT_DATE), 'YYYY-MM') AS month,
             COALESCE(SUM(amount), 0) AS total_amount,
             COUNT(*) AS record_count
         FROM daily_expenses
-        WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
-          AND date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        WHERE date >= :month_start
+          AND date < :next_month_start
     """)
 
-    row = db.execute(query).mappings().one()
+    row = db.execute(
+        query, {"month_start": month_start, "next_month_start": next_month_start}
+    ).mappings().one()
 
     return {
-        "month": row["month"],
+        "month": month_label,
         "total_amount": int(row["total_amount"] or 0),
         "record_count": int(row["record_count"] or 0),
     }
 
+
 @router.get("/expenses/category")
 def get_expenses_by_category(db: Session = Depends(get_db)):
+    month_start = get_month_start(None)
+    next_month_start = get_next_month_start(month_start)
+
     query = text("""
         SELECT
             category,
             COALESCE(SUM(amount), 0) AS total_amount,
             COUNT(*) AS record_count
         FROM daily_expenses
-        WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
-          AND date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        WHERE date >= :month_start
+          AND date < :next_month_start
         GROUP BY category
         ORDER BY total_amount DESC
     """)
 
-    rows = db.execute(query).mappings().all()
+    rows = db.execute(
+        query, {"month_start": month_start, "next_month_start": next_month_start}
+    ).mappings().all()
 
     return [
         {
@@ -471,14 +238,8 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/expenses/daily-ai-summary")
-def get_daily_expense_ai_summary(
-    target_date: date | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    report_date = target_date or get_today()
-
+def _get_daily_expense_ai_summary_core(report_date: date, db: Session) -> dict:
+    """Core daily AI summary logic. No auth/Depends here."""
     summary_query = text("""
         SELECT
             COALESCE(SUM(amount), 0) AS total_amount,
@@ -533,19 +294,11 @@ def get_daily_expense_ai_summary(
         for row in recent_rows
     ]
 
-    fallback_message = build_daily_expense_message(
-        report_date,
-        total_amount,
-        record_count,
-        categories,
-        recent_days,
-    )
-
     if record_count == 0:
         return {
             "status": "success",
             "date": report_date.isoformat(),
-            "message": fallback_message,
+            "message": "今天還沒有支出紀錄。",
             "data": {
                 "total_amount": total_amount,
                 "record_count": record_count,
@@ -587,11 +340,9 @@ def get_daily_expense_ai_summary(
         error_message = exc.detail if isinstance(exc, HTTPException) else str(exc)
 
         return {
-            "status": "openai_unavailable",
+            "status": "error",
             "date": report_date.isoformat(),
-            "message": fallback_message,
-            "fallback_message": fallback_message,
-            "openai_error": error_message,
+            "error": error_message,
             "data": {
                 "total_amount": total_amount,
                 "record_count": record_count,
@@ -600,13 +351,12 @@ def get_daily_expense_ai_summary(
             },
         }
 
-    message = response.output_text.strip() or fallback_message
+    message = (response.output_text or "").strip() or "今日支出分析已完成。"
 
     return {
         "status": "success",
         "date": report_date.isoformat(),
         "message": message,
-        "fallback_message": fallback_message,
         "data": {
             "total_amount": total_amount,
             "record_count": record_count,
@@ -616,28 +366,33 @@ def get_daily_expense_ai_summary(
     }
 
 
+@router.get("/expenses/daily-ai-summary")
+def get_daily_expense_ai_summary(
+    target_date: date | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_shortcut_api_key),
+):
+    report_date = target_date or get_today()
+    return _get_daily_expense_ai_summary_core(report_date, db)
+
+
 @router.get("/expenses/daily-ai-summary/message", response_class=PlainTextResponse)
 def get_daily_expense_ai_summary_message(
     target_date: date | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    summary = get_daily_expense_ai_summary(
-        target_date=target_date,
-        db=db,
-        _=_,
-    )
+    report_date = target_date or get_today()
+    summary = _get_daily_expense_ai_summary_core(report_date, db)
+
+    if summary.get("status") == "error":
+        return PlainTextResponse(f"AI 摘要失敗：{summary.get('error', '未知錯誤')}")
 
     return PlainTextResponse(summary["message"])
 
 
-@router.get("/expenses/monthly-ai-summary")
-def get_monthly_expense_ai_summary(
-    target_month: str | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    month_start = get_month_start(target_month)
+def _get_monthly_expense_ai_summary_core(month_start: date, db: Session) -> dict:
+    """Core monthly AI summary logic. No auth/Depends here."""
     next_month_start = get_next_month_start(month_start)
     month_label = month_start.strftime("%Y-%m")
 
@@ -702,20 +457,11 @@ def get_monthly_expense_ai_summary(
     ]
     budget_context = get_monthly_budget_context(total_amount)
 
-    fallback_message = build_monthly_expense_message(
-        month_label,
-        total_amount,
-        record_count,
-        categories,
-        daily_totals,
-        budget_context,
-    )
-
     if record_count == 0:
         return {
             "status": "success",
             "month": month_label,
-            "message": fallback_message,
+            "message": "本月還沒有支出紀錄。",
             "data": {
                 "total_amount": total_amount,
                 "record_count": record_count,
@@ -763,11 +509,9 @@ def get_monthly_expense_ai_summary(
         error_message = exc.detail if isinstance(exc, HTTPException) else str(exc)
 
         return {
-            "status": "openai_unavailable",
+            "status": "error",
             "month": month_label,
-            "message": fallback_message,
-            "fallback_message": fallback_message,
-            "openai_error": error_message,
+            "error": error_message,
             "data": {
                 "total_amount": total_amount,
                 "record_count": record_count,
@@ -777,13 +521,12 @@ def get_monthly_expense_ai_summary(
             },
         }
 
-    message = response.output_text.strip() or fallback_message
+    message = (response.output_text or "").strip() or "本月支出分析已完成。"
 
     return {
         "status": "success",
         "month": month_label,
         "message": message,
-        "fallback_message": fallback_message,
         "data": {
             "total_amount": total_amount,
             "record_count": record_count,
@@ -794,16 +537,26 @@ def get_monthly_expense_ai_summary(
     }
 
 
+@router.get("/expenses/monthly-ai-summary")
+def get_monthly_expense_ai_summary(
+    target_month: str | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_shortcut_api_key),
+):
+    month_start = get_month_start(target_month)
+    return _get_monthly_expense_ai_summary_core(month_start, db)
+
+
 @router.get("/expenses/monthly-ai-summary/message", response_class=PlainTextResponse)
 def get_monthly_expense_ai_summary_message(
     target_month: str | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    summary = get_monthly_expense_ai_summary(
-        target_month=target_month,
-        db=db,
-        _=_,
-    )
+    month_start = get_month_start(target_month)
+    summary = _get_monthly_expense_ai_summary_core(month_start, db)
+
+    if summary.get("status") == "error":
+        return PlainTextResponse(f"AI 摘要失敗：{summary.get('error', '未知錯誤')}")
 
     return PlainTextResponse(summary["message"])
