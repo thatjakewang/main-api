@@ -102,7 +102,7 @@ Response:
 {
   "status": "success",
   "month": "2026-05",
-  "message": "2026-05 本月花費分析...",
+  "message": "2026-05 Monthly expense analysis...",
   "data": {
     "total_amount": 1401,
     "record_count": 15,

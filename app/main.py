@@ -1,3 +1,9 @@
+"""Main FastAPI application entrypoint.
+
+Mounts the Tesla and Life routers, configures CORS for the personal website + local dev,
+and exposes basic health/root endpoints. The real business logic lives in the routers.
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import tesla, life
@@ -7,6 +13,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS is intentionally narrow (only the real frontend domains + local dev).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -22,11 +29,13 @@ app.add_middleware(
 
 @app.get("/health")
 def health_check():
+    """Basic health check for the entire API (used by load balancers, monitors, etc.)."""
     return {"status": "ok"}
 
 
 @app.get("/")
 def root():
+    """Root endpoint returning basic service info and links to docs/health."""
     return {
         "status": "ok",
         "service": "tesla-api",
@@ -35,12 +44,14 @@ def root():
     }
 
 
+# Tesla cost tracking (public stats + protected writes for charging/car expenses)
 app.include_router(
     tesla.router,
     prefix="/api/tesla",
     tags=["Tesla"],
 )
 
+# Daily life expenses + AI summaries (some endpoints public, AI ones protected)
 app.include_router(
     life.router,
     prefix="/api/life",

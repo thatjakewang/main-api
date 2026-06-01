@@ -1,3 +1,10 @@
+"""Tesla router - cost tracking for a personal Tesla (charging + car expenses).
+
+Public read-only stats endpoints plus protected write endpoints (used by iPhone
+Shortcuts / automation). All monetary values are stored as integers (cents or whole
+currency units) and kWh as floats.
+"""
+
 from datetime import date
 
 from fastapi import APIRouter, Depends
@@ -14,6 +21,7 @@ settings = get_settings()
 
 
 class ChargingRecordCreate(BaseModel):
+    """Payload for creating a charging record (Tesla Supercharger, etc.)."""
     charge_date: date
     provider: str
     amount: int = Field(ge=0)
@@ -21,12 +29,19 @@ class ChargingRecordCreate(BaseModel):
 
 
 class CarExpenseCreate(BaseModel):
+    """Payload for recording a car-related expense (insurance, maintenance, etc.)."""
     date: date
     item: str
     amount: int = Field(ge=0)
 
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
+    """Return high-level Tesla cost statistics (public).
+
+    Includes lifetime totals, average price per kWh, and cost per km based on
+    the configured TESLA_ODOMETER_KM. All queries are simple aggregates over the
+    entire history (personal use, tables stay small).
+    """
     expense_query = text("""
         SELECT
             COALESCE(SUM(amount), 0) AS car_expense_total
@@ -65,6 +80,10 @@ def get_stats(db: Session = Depends(get_db)):
 
 @router.get("/expenses")
 def get_expenses(db: Session = Depends(get_db)):
+    """Return car expenses grouped by item (e.g. Insurance, Tires), sorted by total descending.
+
+    Public endpoint.
+    """
     query = text("""
         SELECT
             item,
@@ -87,6 +106,11 @@ def get_expenses(db: Session = Depends(get_db)):
 
 @router.get("/charging/providers")
 def get_charging_by_provider(db: Session = Depends(get_db)):
+    """Return charging statistics grouped by provider (Supercharger, Home, etc.).
+
+    Includes total kWh, total cost, and average price per kWh per provider.
+    Public endpoint. NULLIF protects against division by zero.
+    """
     query = text("""
         SELECT
             provider,
@@ -113,6 +137,11 @@ def get_charging_by_provider(db: Session = Depends(get_db)):
 
 @router.get("/charging/monthly-trend")
 def get_monthly_charging_trend(db: Session = Depends(get_db)):
+    """Return month-by-month charging totals and average price per kWh.
+
+    Uses Postgres DATE_TRUNC for monthly bucketing. Ordered chronologically.
+    Public endpoint.
+    """
     query = text("""
         SELECT
             TO_CHAR(DATE_TRUNC('month', charge_date), 'YYYY-MM') AS month,
@@ -142,6 +171,10 @@ def create_charging_record(
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
+    """Insert a new charging record (protected).
+
+    Used by iPhone Shortcuts or other trusted clients to log a charge session.
+    """
     query = text("""
         INSERT INTO charging_records
             (charge_date, provider, amount, kwh)
@@ -177,6 +210,10 @@ def create_car_expense(
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
+    """Insert a new car expense record (protected).
+
+    Used by Shortcuts etc. to log one-off car costs (tires, insurance, etc.).
+    """
     query = text("""
         INSERT INTO car_expenses
             (date, item, amount)
