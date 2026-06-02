@@ -34,8 +34,12 @@ class CarExpenseCreate(BaseModel):
     item: str
     amount: int = Field(ge=0)
 
+# Returns aggregated Tesla cost stats (total expenses, charging costs, cost per km).
+# Public endpoint - no authentication required.
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
+    # Returns aggregated Tesla cost stats (total expenses, charging costs, cost per km).
+    # Public endpoint - no authentication required.
     """Return high-level Tesla cost statistics (public).
 
     Includes lifetime totals, average price per kWh, and cost per km based on
@@ -78,8 +82,12 @@ def get_stats(db: Session = Depends(get_db)):
     }
 
 
+# Returns car expenses grouped and summed by item (e.g. "Insurance", "Tires").
+# Sorted by total descending. Public endpoint.
 @router.get("/expenses")
 def get_expenses(db: Session = Depends(get_db)):
+    # Returns car expenses grouped and summed by item (e.g. "Insurance", "Tires").
+    # Sorted by total descending. Public endpoint.
     """Return car expenses grouped by item (e.g. Insurance, Tires), sorted by total descending.
 
     Public endpoint.
@@ -104,8 +112,12 @@ def get_expenses(db: Session = Depends(get_db)):
     ]
 
 
+# Groups charging records by provider and calculates totals + avg price per kWh.
+# Public endpoint for dashboard insights.
 @router.get("/charging/providers")
 def get_charging_by_provider(db: Session = Depends(get_db)):
+    # Groups charging records by provider and calculates totals + avg price per kWh.
+    # Public endpoint for dashboard insights.
     """Return charging statistics grouped by provider (Supercharger, Home, etc.).
 
     Includes total kWh, total cost, and average price per kWh per provider.
@@ -135,8 +147,12 @@ def get_charging_by_provider(db: Session = Depends(get_db)):
     ]
 
 
+# Provides monthly trend data for charging (kWh, cost, avg price).
+# Uses DB functions for bucketing. Public endpoint.
 @router.get("/charging/monthly-trend")
 def get_monthly_charging_trend(db: Session = Depends(get_db)):
+    # Provides monthly trend data for charging (kWh, cost, avg price).
+    # Uses DB functions for bucketing. Public endpoint.
     """Return month-by-month charging totals and average price per kWh.
 
     Uses Postgres DATE_TRUNC for monthly bucketing. Ordered chronologically.
@@ -165,12 +181,16 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
         for row in rows
     ]
 
+# Protected endpoint to insert a new charging session record.
+# Requires valid x-api-key header.
 @router.post("/charging-records")
 def create_charging_record(
     payload: ChargingRecordCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
+    # Protected endpoint to insert a new charging session record.
+    # Requires valid x-api-key header.
     """Insert a new charging record (protected).
 
     Used by iPhone Shortcuts or other trusted clients to log a charge session.
@@ -204,12 +224,16 @@ def create_charging_record(
         },
     }
 
+# Protected endpoint to record a one-time car expense (e.g. maintenance, insurance).
+# Requires valid x-api-key.
 @router.post("/car-expenses")
 def create_car_expense(
     payload: CarExpenseCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
+    # Protected endpoint to record a one-time car expense.
+    # Requires valid x-api-key.
     """Insert a new car expense record (protected).
 
     Used by Shortcuts etc. to log one-off car costs (tires, insurance, etc.).

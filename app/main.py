@@ -27,14 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Basic health check endpoint for the entire API.
+# Used by load balancers, uptime monitors, and the frontend to verify the service is running.
 @app.get("/health")
 def health_check():
+    # Basic health check endpoint for the entire API.
+    # Used by load balancers, uptime monitors, and the frontend to verify the service is running.
     """Basic health check for the entire API (used by load balancers, monitors, etc.)."""
     return {"status": "ok"}
 
 
+# Root endpoint that returns basic service metadata.
+# Useful for quick status checks and links to interactive docs.
 @app.get("/")
 def root():
+    # Root endpoint that returns basic service metadata.
+    # Useful for quick status checks and links to interactive docs.
     """Root endpoint returning basic service info and links to docs/health."""
     return {
         "status": "ok",

@@ -26,6 +26,8 @@ SessionLocal = sessionmaker(
 )
 
 
+# FastAPI dependency providing a per-request SQLAlchemy database session.
+# Ensures the session is properly closed after each request, even on errors.
 def get_db():
     """FastAPI dependency that yields a SQLAlchemy session for a single request.
 
