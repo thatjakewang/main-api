@@ -1,8 +1,9 @@
 """Tesla router - cost tracking for a personal Tesla (charging + car expenses).
 
 Public read-only stats endpoints plus protected write endpoints (used by iPhone
-Shortcuts / automation). All monetary values are stored as integers (cents or whole
-currency units) and kWh as floats.
+Shortcuts / automation). Includes recent lists for charges and car expenses,
+modeled after the life router's Recent Expenses. All monetary values are stored
+as integers (or bigint) and kWh as floats.
 """
 
 from datetime import date
@@ -181,6 +182,81 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
         for row in rows
     ]
 
+
+# Returns the latest 10 charging records for display (no auth needed).
+# Ordered by charge_date then created_at for stable "most recent" behavior.
+# Public recent charging list (last 10). No auth.
+@router.get("/charging/recent")
+def get_recent_charging_records(db: Session = Depends(get_db)):
+    # Public recent charging list (last 10). No auth.
+    """Return the 10 most recent charging records (newest first).
+
+    Public endpoint (no API key required). Useful for quick overview on the dashboard.
+    """
+    query = text("""
+        SELECT
+            id,
+            charge_date,
+            provider,
+            amount,
+            kwh,
+            created_at
+        FROM charging_records
+        ORDER BY charge_date DESC, created_at DESC, id DESC
+        LIMIT 10
+    """)
+
+    rows = db.execute(query).mappings().all()
+
+    return [
+        {
+            "id": row["id"],
+            "charge_date": row["charge_date"].isoformat() if row["charge_date"] else None,
+            "provider": row["provider"],
+            "amount": int(row["amount"]) if row["amount"] is not None else 0,
+            "kwh": round(float(row["kwh"] or 0), 2),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
+
+
+# Returns the latest 10 car expenses for display (no auth needed).
+# Ordered by date then created_at.
+# Public recent car expenses list (last 10). No auth.
+@router.get("/expenses/recent")
+def get_recent_car_expenses(db: Session = Depends(get_db)):
+    # Public recent car expenses list (last 10). No auth.
+    """Return the 10 most recent car expense records (newest first).
+
+    Public endpoint (no API key required). Useful for quick overview on the dashboard.
+    """
+    query = text("""
+        SELECT
+            id,
+            date,
+            item,
+            amount,
+            created_at
+        FROM car_expenses
+        ORDER BY date DESC, created_at DESC, id DESC
+        LIMIT 10
+    """)
+
+    rows = db.execute(query).mappings().all()
+
+    return [
+        {
+            "id": row["id"],
+            "date": row["date"].isoformat() if row["date"] else None,
+            "item": row["item"],
+            "amount": int(row["amount"]) if row["amount"] is not None else 0,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
+
+
 # Protected endpoint to insert a new charging session record.
 # Requires valid x-api-key header.
 @router.post("/charging-records")
@@ -200,9 +276,10 @@ def create_charging_record(
             (charge_date, provider, amount, kwh)
         VALUES
             (:charge_date, :provider, :amount, :kwh)
+        RETURNING id
     """)
 
-    db.execute(
+    result = db.execute(
         query,
         {
             "charge_date": payload.charge_date,
@@ -217,6 +294,7 @@ def create_charging_record(
         "status": "success",
         "message": "Charging record created",
         "data": {
+            "id": result.scalar_one(),
             "charge_date": payload.charge_date.isoformat(),
             "provider": payload.provider,
             "amount": payload.amount,
@@ -243,9 +321,10 @@ def create_car_expense(
             (date, item, amount)
         VALUES
             (:date, :item, :amount)
+        RETURNING id
     """)
 
-    db.execute(
+    result = db.execute(
         query,
         {
             "date": payload.date,
@@ -259,6 +338,7 @@ def create_car_expense(
         "status": "success",
         "message": "Car expense created",
         "data": {
+            "id": result.scalar_one(),
             "date": payload.date.isoformat(),
             "item": payload.item,
             "amount": payload.amount,

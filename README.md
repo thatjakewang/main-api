@@ -44,8 +44,12 @@ API docs available at http://localhost:8000/docs after startup.
 | GET | `/health` | Health check |
 | GET | `/api/tesla/stats` | Total cost, charging cost, cost per km |
 | GET | `/api/tesla/expenses` | Car expenses grouped by item |
+| GET | `/api/tesla/expenses/recent` | Recent 10 car expenses (newest first) |
 | GET | `/api/tesla/charging/providers` | Charging cost grouped by provider |
 | GET | `/api/tesla/charging/monthly-trend` | Monthly charging trend |
+| GET | `/api/tesla/charging/recent` | Recent 10 charging records (newest first) |
+
+> Note: `charging_records` and `car_expenses` tables were extended with `id` (SERIAL) and `created_at` (for stable recent ordering, matching `daily_expenses`).
 
 ### Protected (Header: `x-api-key`)
 
@@ -70,6 +74,16 @@ API docs available at http://localhost:8000/docs after startup.
 }
 ```
 
+Response includes `id`:
+
+```json
+{
+  "status": "success",
+  "message": "Charging record created",
+  "data": { "id": 123, "charge_date": "2026-05-09", "provider": "...", "amount": 150, "kwh": 30.5 }
+}
+```
+
 ### POST `/api/tesla/car-expenses`
 
 ```json
@@ -77,6 +91,16 @@ API docs available at http://localhost:8000/docs after startup.
   "date": "2026-05-09",
   "item": "Insurance",
   "amount": 25000
+}
+```
+
+Response includes `id`:
+
+```json
+{
+  "status": "success",
+  "message": "Car expense created",
+  "data": { "id": 45, "date": "2026-05-09", "item": "Insurance", "amount": 25000 }
 }
 ```
 
