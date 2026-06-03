@@ -1,9 +1,16 @@
 #!/usr/bin/env python
 """
 Migration: Add id + created_at columns to charging_records and car_expenses
-           so that the new /charging/recent and /expenses/recent endpoints work.
+           to enable stable ordering + populated id/created_at in the
+           /charging/recent and /expenses/recent responses (and in create responses).
 
-Run this on the PRODUCTION server after `git pull`, before restarting the API.
+The API endpoints are backward-compatible and will work (with id/created_at=null
+and date-only ordering) even if you deploy before running this. Running the
+migration later will automatically enrich responses and improve sort stability
+on subsequent requests (no restart required).
+
+Run this on the PRODUCTION server after `git pull` (can be before or after
+restarting the API).
 
 Usage (after cd into main-api dir and loading env):
     source .venv/bin/activate

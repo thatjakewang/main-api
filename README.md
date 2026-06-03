@@ -50,6 +50,9 @@ API docs available at http://localhost:8000/docs after startup.
 | GET | `/api/tesla/charging/recent` | Recent 10 charging records (newest first) |
 
 > Note: `charging_records` and `car_expenses` tables were extended with `id` (SERIAL) and `created_at` (for stable recent ordering, matching `daily_expenses`).
+> The `/charging/recent`, `/expenses/recent`, and the two create endpoints are backward-compatible:
+> they work on old schema (id/created_at returned as null) and automatically use the richer data + better
+> ordering once the migration has been applied (no API restart needed after migration).
 
 ### Protected (Header: `x-api-key`)
 
@@ -74,7 +77,7 @@ API docs available at http://localhost:8000/docs after startup.
 }
 ```
 
-Response includes `id`:
+Response includes `id` (may be null until migration run):
 
 ```json
 {
@@ -94,7 +97,7 @@ Response includes `id`:
 }
 ```
 
-Response includes `id`:
+Response includes `id` (may be null until migration run):
 
 ```json
 {
