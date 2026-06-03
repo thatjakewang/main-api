@@ -35,6 +35,22 @@ uvicorn app.main:app --reload
 
 API docs available at http://localhost:8000/docs after startup.
 
+## Database Migrations (one-off scripts)
+
+Some schema changes are delivered as standalone scripts in `migrations/`.
+
+These scripts auto-load `DATABASE_URL` from the `.env` in the project root (using `python-dotenv`).
+
+On the production server:
+
+```bash
+cd /var/www/main-api
+source .venv/bin/activate
+python migrations/add_tesla_recent_columns.py
+```
+
+You can run the script before or after restarting the API service (the API endpoints are backward-compatible).
+
 ## Endpoints
 
 ### Public

@@ -12,22 +12,34 @@ on subsequent requests (no restart required).
 Run this on the PRODUCTION server after `git pull` (can be before or after
 restarting the API).
 
-Usage (after cd into main-api dir and loading env):
+The script will automatically load DATABASE_URL from the .env file in the
+project root (no need to manually `source .env`).
+
+Usage:
+    cd /var/www/main-api
     source .venv/bin/activate
-    source .env
     python migrations/add_tesla_recent_columns.py
 """
 import os
 import sys
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 
 def run_migration():
+    # Always load .env from the project root, no matter what the current
+    # working directory is (e.g. running from inside migrations/).
+    # This matches how the real app loads config via pydantic-settings.
+    project_root = Path(__file__).resolve().parent.parent
+    load_dotenv(project_root / ".env")
+
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("❌ ERROR: DATABASE_URL environment variable is not set.")
-        print("   Make sure you have sourced your .env file or set the variable.")
+        print("   Make sure a .env file exists in the project root with DATABASE_URL.")
+        print(f"   Looked for .env at: {project_root / '.env'}")
         sys.exit(1)
 
     print(f"Connecting to database (host hidden for safety)...")
