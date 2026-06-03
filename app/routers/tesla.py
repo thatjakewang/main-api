@@ -6,7 +6,8 @@ modeled after the life router's Recent Expenses. All monetary values are stored
 as integers (or bigint) and kWh as floats.
 
 The recent GETs and create POSTs are intentionally backward-compatible with
-tables that pre-date the id + created_at columns (see the migration script).
+tables that pre-date the id + created_at columns (see migrations/add_tesla_recent_columns.py,
+executed on prod 2026-06-03).
 """
 
 from datetime import date
@@ -214,9 +215,10 @@ def get_recent_charging_records(db: Session = Depends(get_db)):
     Public endpoint (no API key required). Useful for quick overview on the dashboard.
 
     Backward compatible: works whether or not the table has id/created_at columns
-    (see migration/add_tesla_recent_columns.py). When columns are present the
+    (see migrations/add_tesla_recent_columns.py). When columns are present the
     response includes real values and uses stable ordering; otherwise id/created_at
     are null and we fall back to charge_date ordering.
+    This migration was executed on prod 2026-06-03.
     """
     has_id = _has_column(db, "charging_records", "id")
     has_created = _has_column(db, "charging_records", "created_at")
@@ -259,9 +261,10 @@ def get_recent_car_expenses(db: Session = Depends(get_db)):
     Public endpoint (no API key required). Useful for quick overview on the dashboard.
 
     Backward compatible: works whether or not the table has id/created_at columns
-    (see migration/add_tesla_recent_columns.py). When columns are present the
+    (see migrations/add_tesla_recent_columns.py). When columns are present the
     response includes real values and uses stable ordering; otherwise id/created_at
     are null and we fall back to date ordering.
+    This migration was executed on prod 2026-06-03.
     """
     has_id = _has_column(db, "car_expenses", "id")
     has_created = _has_column(db, "car_expenses", "created_at")
@@ -309,8 +312,9 @@ def create_charging_record(
     Used by iPhone Shortcuts or other trusted clients to log a charge session.
 
     Backward compatible with tables that do not yet have an "id" column
-    (pre add_tesla_recent_columns.py migration). When the column exists we
-    use RETURNING to get the generated id; otherwise the returned data.id is null.
+    (pre add_tesla_recent_columns.py migration, executed on prod 2026-06-03).
+    When the column exists we use RETURNING to get the generated id; otherwise the
+    returned data.id is null.
     """
     has_id = _has_column(db, "charging_records", "id")
 

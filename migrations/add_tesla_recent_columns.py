@@ -4,6 +4,11 @@ Migration: Add id + created_at columns to charging_records and car_expenses
            to enable stable ordering + populated id/created_at in the
            /charging/recent and /expenses/recent responses (and in create responses).
 
+EXECUTED on production (web-01) on 2026-06-03.
+
+This is a one-off script kept for reference.
+It is idempotent (uses IF NOT EXISTS) and safe to re-run.
+
 The API endpoints are backward-compatible and will work (with id/created_at=null
 and date-only ordering) even if you deploy before running this. Running the
 migration later will automatically enrich responses and improve sort stability
