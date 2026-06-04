@@ -28,12 +28,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
-# Returns the application settings singleton (cached for performance).
-# Loads from .env or environment variables using pydantic-settings.
 @lru_cache
 def get_settings() -> Settings:
-    # Returns the application settings singleton (cached for performance).
-    # Loads from .env or environment variables using pydantic-settings.
     """Return a cached Settings instance loaded from environment / .env file.
 
     Using lru_cache means the .env is read only once per process (good for performance

@@ -32,8 +32,6 @@ class DailyExpenseCreate(BaseModel):
     payment_method: str | None = None
 
 
-# Helper to safely parse budget-related strings from settings (handles commas like "80,000").
-# Returns None for bad input. Used by budget context calculations.
 def parse_money_setting(value: str | None) -> int | None:
     """Parse a money string that may contain commas (e.g. '80,000') into a non-negative int.
 
@@ -55,8 +53,6 @@ def parse_money_setting(value: str | None) -> int | None:
     return amount if amount >= 0 else None
 
 
-# Computes disposable income, usage ratio, and remaining budget for the current month.
-# Feeds into the monthly AI prompt so it can give context-aware advice without leaking salary.
 def get_monthly_budget_context(total_amount: int) -> dict:
     """Compute budget context (disposable income usage etc.) for the monthly AI summary.
 
@@ -91,8 +87,6 @@ def get_monthly_budget_context(total_amount: int) -> dict:
     }
 
 
-# Factory for OpenAI client. Raises clear HTTP errors if key or library is missing.
-# Used only by the AI summary core functions.
 def create_openai_client():
     """Create and return an authenticated OpenAI client.
 
@@ -110,8 +104,6 @@ def create_openai_client():
     return OpenAI(api_key=settings.openai_api_key)
 
 
-# Returns the current date according to APP_TIMEZONE setting.
-# Critical for making "today" and "this month" consistent with the user's location/timezone.
 def get_today() -> date:
     """Return today's date in the configured APP_TIMEZONE.
 
@@ -127,8 +119,6 @@ def get_today() -> date:
     return datetime.now(timezone).date()
 
 
-# Calculates the start of a month (either provided or current).
-# Always uses app timezone logic so reports match what the user expects.
 def get_month_start(target_month: str | None = None) -> date:
     """Compute the first day of a month.
 
@@ -150,8 +140,6 @@ def get_month_start(target_month: str | None = None) -> date:
     return date(parsed_month.year, parsed_month.month, 1)
 
 
-# Simple helper to get the exclusive end date for a month range.
-# Used for SQL WHERE date >= start AND date < next_month_start.
 def get_next_month_start(month_start: date) -> date:
     """Return the first day of the month following the given month_start date.
 
@@ -164,24 +152,18 @@ def get_next_month_start(month_start: date) -> date:
     return date(month_start.year, month_start.month + 1, 1)
 
 
-# Lightweight health check just for the /api/life sub-router.
-# Simple health check specific to the life expenses sub-API.
 @router.get("/health")
 def life_health_check():
-    # Simple health check specific to the life expenses sub-API.
     """Simple health check endpoint for the life (daily expenses) router."""
     return {"status": "life ok"}
 
-# Protected endpoint to log a daily expense (category, amount, optional payment method).
-# Uses RETURNING to get the new ID back from Postgres.
-# Protected create for daily expenses. Auth via x-api-key.
+
 @router.post("/expenses")
 def create_daily_expense(
     payload: DailyExpenseCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected create for daily expenses. Auth via x-api-key.
     """Create a new daily expense record (protected by x-api-key).
 
     Stores the expense in the daily_expenses table and returns the generated id.
@@ -218,12 +200,8 @@ def create_daily_expense(
         },
     }
 
-# Returns the latest 10 expenses for display (no auth needed).
-# Ordered by date then created_at for stable "most recent" behavior.
-# Public recent expenses list (last 10). No auth.
 @router.get("/expenses/recent")
 def get_recent_daily_expenses(db: Session = Depends(get_db)):
-    # Public recent expenses list (last 10). No auth.
     """Return the 10 most recent daily expense records (newest first).
 
     Public endpoint (no API key required). Useful for quick overview on the dashboard.
@@ -255,12 +233,8 @@ def get_recent_daily_expenses(db: Session = Depends(get_db)):
         for row in rows
     ]
 
-# Public summary of this month's total spend and number of entries.
-# Uses timezone-aware month boundaries (not DB CURRENT_DATE).
-# Public current-month aggregate (total + count). Timezone-aware.
 @router.get("/expenses/summary")
 def get_daily_expense_summary(db: Session = Depends(get_db)):
-    # Public current-month aggregate (total + count). Timezone-aware.
     """Return aggregate total and count of expenses for the current month (APP_TIMEZONE aware).
 
     Public endpoint. The month boundary uses get_month_start / get_next_month_start
@@ -290,18 +264,14 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
     }
 
 
-# Public breakdown of this month's spending by category (sorted by amount desc).
-# Helps the dashboard show pie charts or lists.
-# Public category breakdown for current month. Timezone-aware.
 @router.get("/expenses/category")
 def get_expenses_by_category(db: Session = Depends(get_db)):
-    # Public category breakdown for current month. Timezone-aware.
     """Return current-month expenses grouped by category (highest total first).
 
     Public endpoint. Uses timezone-aware month boundaries for consistency with
     other summary endpoints.
     """
-    month_start = get_month_start(None)
+    month_start = get_month_start()
     next_month_start = get_next_month_start(month_start)
 
     query = text("""
@@ -330,9 +300,6 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
     ]
 
 
-# Private core that does all the heavy lifting for daily AI summaries:
-# queries DB, builds payload, calls OpenAI, handles no-data case + fallbacks.
-# Separated so the /message and JSON endpoints can reuse it cleanly without auth hacks.
 def _get_daily_expense_ai_summary_core(report_date: date, db: Session) -> dict:
     """Core logic for generating (or skipping) an AI-powered daily expense summary.
 
@@ -478,16 +445,12 @@ def _get_daily_expense_ai_summary_core(report_date: date, db: Session) -> dict:
     }
 
 
-# Public (protected) JSON endpoint for daily AI summary.
-# Computes the report date then delegates to the core.
-# Protected daily AI summary (returns full JSON with data + message).
 @router.get("/expenses/daily-ai-summary")
 def get_daily_expense_ai_summary(
     target_date: date | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected daily AI summary (returns full JSON with data + message).
     """Generate a daily AI expense summary (JSON) for the given (or today's) date.
 
     Protected endpoint. The heavy lifting is in _get_daily_expense_ai_summary_core.
@@ -498,16 +461,12 @@ def get_daily_expense_ai_summary(
     return _get_daily_expense_ai_summary_core(report_date, db)
 
 
-# Plain text variant of the daily summary, perfect for Shortcuts to paste into iMessage.
-# Handles error case gracefully to avoid KeyError on "message".
-# Protected plain-text daily AI message (for Shortcuts/iMessage).
 @router.get("/expenses/daily-ai-summary/message", response_class=PlainTextResponse)
 def get_daily_expense_ai_summary_message(
     target_date: date | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected plain-text daily AI message (for Shortcuts/iMessage).
     """Return only the AI daily summary message as plain text (for iPhone Shortcuts / easy copy).
 
     Protected. Gracefully handles the error case from the core so the client never
@@ -522,9 +481,6 @@ def get_daily_expense_ai_summary_message(
     return PlainTextResponse(summary["message"])
 
 
-# Private core for monthly AI summaries (similar structure to daily).
-# Queries full month + daily breakdown + budget context, then calls OpenAI.
-# Reusable by both JSON and plain-text endpoints.
 def _get_monthly_expense_ai_summary_core(month_start: date, db: Session) -> dict:
     """Core logic for generating (or skipping) an AI-powered monthly expense summary.
 
@@ -686,16 +642,12 @@ def _get_monthly_expense_ai_summary_core(month_start: date, db: Session) -> dict
     }
 
 
-# Protected JSON endpoint for monthly AI summary.
-# Resolves the month then calls the core.
-# Protected monthly AI summary JSON endpoint.
 @router.get("/expenses/monthly-ai-summary")
 def get_monthly_expense_ai_summary(
     target_month: str | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected monthly AI summary JSON endpoint.
     """Generate a monthly AI expense summary (JSON) for the given (or current) month.
 
     Protected. Delegates to the core function. The "message" will be English text
@@ -705,16 +657,12 @@ def get_monthly_expense_ai_summary(
     return _get_monthly_expense_ai_summary_core(month_start, db)
 
 
-# Plain text monthly summary endpoint for easy integration (Shortcuts, etc.).
-# Graceful error handling.
-# Protected plain-text monthly AI message (for Shortcuts).
 @router.get("/expenses/monthly-ai-summary/message", response_class=PlainTextResponse)
 def get_monthly_expense_ai_summary_message(
     target_month: str | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected plain-text monthly AI message (for Shortcuts).
     """Return only the AI monthly summary as plain text (ideal for Shortcuts / iMessage).
 
     Protected. Safely handles error responses from the core to avoid KeyError.

@@ -6,7 +6,8 @@ and exposes basic health/root endpoints. The real business logic lives in the ro
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import tesla, life
+
+from app.routers import life, tesla
 
 app = FastAPI(
     title="My Tesla Analytics API",
@@ -27,22 +28,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Basic health check endpoint for the entire API.
-# Used by load balancers, uptime monitors, and the frontend to verify the service is running.
+
 @app.get("/health")
 def health_check():
-    # Basic health check endpoint for the entire API.
-    # Used by load balancers, uptime monitors, and the frontend to verify the service is running.
     """Basic health check for the entire API (used by load balancers, monitors, etc.)."""
     return {"status": "ok"}
 
 
-# Root endpoint that returns basic service metadata.
-# Useful for quick status checks and links to interactive docs.
 @app.get("/")
 def root():
-    # Root endpoint that returns basic service metadata.
-    # Useful for quick status checks and links to interactive docs.
     """Root endpoint returning basic service info and links to docs/health."""
     return {
         "status": "ok",
@@ -53,15 +47,7 @@ def root():
 
 
 # Tesla cost tracking (public stats + protected writes for charging/car expenses)
-app.include_router(
-    tesla.router,
-    prefix="/api/tesla",
-    tags=["Tesla"],
-)
+app.include_router(tesla.router, prefix="/api/tesla", tags=["Tesla"])
 
 # Daily life expenses + AI summaries (some endpoints public, AI ones protected)
-app.include_router(
-    life.router,
-    prefix="/api/life",
-    tags=["Life"],
-)
+app.include_router(life.router, prefix="/api/life", tags=["Life"])

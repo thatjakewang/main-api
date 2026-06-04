@@ -1,13 +1,9 @@
 """Tesla router - cost tracking for a personal Tesla (charging + car expenses).
 
 Public read-only stats endpoints plus protected write endpoints (used by iPhone
-Shortcuts / automation). Includes recent lists for charges and car expenses,
-modeled after the life router's Recent Expenses. All monetary values are stored
-as integers (or bigint) and kWh as floats.
-
-The recent GETs and create POSTs are intentionally backward-compatible with
-tables that pre-date the id + created_at columns (see migrations/add_tesla_recent_columns.py,
-executed on prod 2026-06-03).
+Shortcuts / automation). All monetary values are stored as integers and kWh as
+floats. The id + created_at columns were added in
+migrations/add_tesla_recent_columns.py (executed on prod 2026-06-03).
 """
 
 from datetime import date
@@ -20,25 +16,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import verify_shortcut_api_key
-
-
-def _has_column(db: Session, table: str, col: str) -> bool:
-    """Return True if the given table currently has the named column.
-
-    Used to keep /recent and create endpoints backward-compatible with
-    pre-migration tables (before id + created_at were added). The check is
-    cheap and runs against information_schema at request time.
-    """
-    try:
-        q = text("""
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = :t AND column_name = :c
-            LIMIT 1
-        """)
-        return db.execute(q, {"t": table, "c": col}).scalar() is not None
-    except Exception:
-        return False
 
 router = APIRouter()
 settings = get_settings()
@@ -58,12 +35,9 @@ class CarExpenseCreate(BaseModel):
     item: str
     amount: int = Field(ge=0)
 
-# Returns aggregated Tesla cost stats (total expenses, charging costs, cost per km).
-# Public endpoint - no authentication required.
+
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
-    # Returns aggregated Tesla cost stats (total expenses, charging costs, cost per km).
-    # Public endpoint - no authentication required.
     """Return high-level Tesla cost statistics (public).
 
     Includes lifetime totals, average price per kWh, and cost per km based on
@@ -71,11 +45,9 @@ def get_stats(db: Session = Depends(get_db)):
     entire history (personal use, tables stay small).
     """
     expense_query = text("""
-        SELECT
-            COALESCE(SUM(amount), 0) AS car_expense_total
+        SELECT COALESCE(SUM(amount), 0) AS car_expense_total
         FROM car_expenses
     """)
-
     charging_query = text("""
         SELECT
             COALESCE(SUM(amount), 0) AS charging_cost,
@@ -106,42 +78,25 @@ def get_stats(db: Session = Depends(get_db)):
     }
 
 
-# Returns car expenses grouped and summed by item (e.g. "Insurance", "Tires").
-# Sorted by total descending. Public endpoint.
 @router.get("/expenses")
 def get_expenses(db: Session = Depends(get_db)):
-    # Returns car expenses grouped and summed by item (e.g. "Insurance", "Tires").
-    # Sorted by total descending. Public endpoint.
-    """Return car expenses grouped by item (e.g. Insurance, Tires), sorted by total descending.
-
-    Public endpoint.
-    """
+    """Return car expenses grouped by item (e.g. Insurance, Tires), sorted by total desc. Public."""
     query = text("""
-        SELECT
-            item,
-            SUM(amount) AS total_amount
+        SELECT item, SUM(amount) AS total_amount
         FROM car_expenses
         GROUP BY item
         ORDER BY total_amount DESC
     """)
-
     rows = db.execute(query).mappings().all()
 
     return [
-        {
-            "item": row["item"],
-            "total_amount": float(row["total_amount"] or 0),
-        }
+        {"item": row["item"], "total_amount": float(row["total_amount"] or 0)}
         for row in rows
     ]
 
 
-# Groups charging records by provider and calculates totals + avg price per kWh.
-# Public endpoint for dashboard insights.
 @router.get("/charging/providers")
 def get_charging_by_provider(db: Session = Depends(get_db)):
-    # Groups charging records by provider and calculates totals + avg price per kWh.
-    # Public endpoint for dashboard insights.
     """Return charging statistics grouped by provider (Supercharger, Home, etc.).
 
     Includes total kWh, total cost, and average price per kWh per provider.
@@ -157,7 +112,6 @@ def get_charging_by_provider(db: Session = Depends(get_db)):
         GROUP BY provider
         ORDER BY total_amount DESC
     """)
-
     rows = db.execute(query).mappings().all()
 
     return [
@@ -171,16 +125,11 @@ def get_charging_by_provider(db: Session = Depends(get_db)):
     ]
 
 
-# Provides monthly trend data for charging (kWh, cost, avg price).
-# Uses DB functions for bucketing. Public endpoint.
 @router.get("/charging/monthly-trend")
 def get_monthly_charging_trend(db: Session = Depends(get_db)):
-    # Provides monthly trend data for charging (kWh, cost, avg price).
-    # Uses DB functions for bucketing. Public endpoint.
     """Return month-by-month charging totals and average price per kWh.
 
-    Uses Postgres DATE_TRUNC for monthly bucketing. Ordered chronologically.
-    Public endpoint.
+    Uses Postgres DATE_TRUNC for monthly bucketing. Ordered chronologically. Public.
     """
     query = text("""
         SELECT
@@ -192,7 +141,6 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
         GROUP BY DATE_TRUNC('month', charge_date)
         ORDER BY DATE_TRUNC('month', charge_date)
     """)
-
     rows = db.execute(query).mappings().all()
 
     return [
@@ -206,154 +154,77 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
     ]
 
 
-# Returns the latest 10 charging records for display (no auth needed).
-# Public recent charging list (last 10). No auth.
 @router.get("/charging/recent")
 def get_recent_charging_records(db: Session = Depends(get_db)):
-    """Return the 10 most recent charging records (newest first).
-
-    Public endpoint (no API key required). Useful for quick overview on the dashboard.
-
-    Backward compatible: works whether or not the table has id/created_at columns
-    (see migrations/add_tesla_recent_columns.py). When columns are present the
-    response includes real values and uses stable ordering; otherwise id/created_at
-    are null and we fall back to charge_date ordering.
-    This migration was executed on prod 2026-06-03.
-    """
-    has_id = _has_column(db, "charging_records", "id")
-    has_created = _has_column(db, "charging_records", "created_at")
-
-    if has_id and has_created:
-        select_cols = "id, charge_date, provider, amount, kwh, created_at"
-        order_by = "ORDER BY charge_date DESC, created_at DESC, id DESC"
-    else:
-        select_cols = "charge_date, provider, amount, kwh"
-        order_by = "ORDER BY charge_date DESC"
-
-    query = text(f"""
-        SELECT {select_cols}
+    """Return the 10 most recent charging records (newest first). Public."""
+    query = text("""
+        SELECT id, charge_date, provider, amount, kwh, created_at
         FROM charging_records
-        {order_by}
+        ORDER BY charge_date DESC, created_at DESC, id DESC
         LIMIT 10
     """)
-
     rows = db.execute(query).mappings().all()
 
     return [
         {
-            "id": row.get("id"),
+            "id": row["id"],
             "charge_date": row["charge_date"].isoformat() if row["charge_date"] else None,
             "provider": row["provider"],
             "amount": int(row["amount"]) if row["amount"] is not None else 0,
             "kwh": round(float(row["kwh"] or 0), 2),
-            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }
         for row in rows
     ]
 
 
-# Returns the latest 10 car expenses for display (no auth needed).
-# Public recent car expenses list (last 10). No auth.
 @router.get("/expenses/recent")
 def get_recent_car_expenses(db: Session = Depends(get_db)):
-    """Return the 10 most recent car expense records (newest first).
-
-    Public endpoint (no API key required). Useful for quick overview on the dashboard.
-
-    Backward compatible: works whether or not the table has id/created_at columns
-    (see migrations/add_tesla_recent_columns.py). When columns are present the
-    response includes real values and uses stable ordering; otherwise id/created_at
-    are null and we fall back to date ordering.
-    This migration was executed on prod 2026-06-03.
-    """
-    has_id = _has_column(db, "car_expenses", "id")
-    has_created = _has_column(db, "car_expenses", "created_at")
-
-    if has_id and has_created:
-        select_cols = "id, date, item, amount, created_at"
-        order_by = "ORDER BY date DESC, created_at DESC, id DESC"
-    else:
-        select_cols = "date, item, amount"
-        order_by = "ORDER BY date DESC"
-
-    query = text(f"""
-        SELECT {select_cols}
+    """Return the 10 most recent car expense records (newest first). Public."""
+    query = text("""
+        SELECT id, date, item, amount, created_at
         FROM car_expenses
-        {order_by}
+        ORDER BY date DESC, created_at DESC, id DESC
         LIMIT 10
     """)
-
     rows = db.execute(query).mappings().all()
 
     return [
         {
-            "id": row.get("id"),
+            "id": row["id"],
             "date": row["date"].isoformat() if row["date"] else None,
             "item": row["item"],
             "amount": int(row["amount"]) if row["amount"] is not None else 0,
-            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }
         for row in rows
     ]
 
 
-# Protected endpoint to insert a new charging session record.
-# Requires valid x-api-key header.
 @router.post("/charging-records")
 def create_charging_record(
     payload: ChargingRecordCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected endpoint to insert a new charging session record.
-    # Requires valid x-api-key header.
-    """Insert a new charging record (protected).
+    """Insert a new charging record (protected by x-api-key).
 
     Used by iPhone Shortcuts or other trusted clients to log a charge session.
-
-    Backward compatible with tables that do not yet have an "id" column
-    (pre add_tesla_recent_columns.py migration, executed on prod 2026-06-03).
-    When the column exists we use RETURNING to get the generated id; otherwise the
-    returned data.id is null.
     """
-    has_id = _has_column(db, "charging_records", "id")
-
-    if has_id:
-        query = text("""
-            INSERT INTO charging_records
-                (charge_date, provider, amount, kwh)
-            VALUES
-                (:charge_date, :provider, :amount, :kwh)
-            RETURNING id
-        """)
-        result = db.execute(
-            query,
-            {
-                "charge_date": payload.charge_date,
-                "provider": payload.provider,
-                "amount": payload.amount,
-                "kwh": payload.kwh,
-            },
-        )
-        new_id = result.scalar_one()
-    else:
-        query = text("""
-            INSERT INTO charging_records
-                (charge_date, provider, amount, kwh)
-            VALUES
-                (:charge_date, :provider, :amount, :kwh)
-        """)
-        db.execute(
-            query,
-            {
-                "charge_date": payload.charge_date,
-                "provider": payload.provider,
-                "amount": payload.amount,
-                "kwh": payload.kwh,
-            },
-        )
-        new_id = None
-
+    query = text("""
+        INSERT INTO charging_records (charge_date, provider, amount, kwh)
+        VALUES (:charge_date, :provider, :amount, :kwh)
+        RETURNING id
+    """)
+    new_id = db.execute(
+        query,
+        {
+            "charge_date": payload.charge_date,
+            "provider": payload.provider,
+            "amount": payload.amount,
+            "kwh": payload.kwh,
+        },
+    ).scalar_one()
     db.commit()
 
     return {
@@ -368,56 +239,30 @@ def create_charging_record(
         },
     }
 
-# Protected endpoint to record a one-time car expense (e.g. maintenance, insurance).
-# Requires valid x-api-key.
+
 @router.post("/car-expenses")
 def create_car_expense(
     payload: CarExpenseCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    # Protected endpoint to record a one-time car expense.
-    # Requires valid x-api-key.
-    """Insert a new car expense record (protected).
+    """Insert a new car expense record (protected by x-api-key).
 
     Used by Shortcuts etc. to log one-off car costs (tires, insurance, etc.).
     """
-    has_id = _has_column(db, "car_expenses", "id")
-
-    if has_id:
-        query = text("""
-            INSERT INTO car_expenses
-                (date, item, amount)
-            VALUES
-                (:date, :item, :amount)
-            RETURNING id
-        """)
-        result = db.execute(
-            query,
-            {
-                "date": payload.date,
-                "item": payload.item,
-                "amount": payload.amount,
-            },
-        )
-        new_id = result.scalar_one()
-    else:
-        query = text("""
-            INSERT INTO car_expenses
-                (date, item, amount)
-            VALUES
-                (:date, :item, :amount)
-        """)
-        db.execute(
-            query,
-            {
-                "date": payload.date,
-                "item": payload.item,
-                "amount": payload.amount,
-            },
-        )
-        new_id = None
-
+    query = text("""
+        INSERT INTO car_expenses (date, item, amount)
+        VALUES (:date, :item, :amount)
+        RETURNING id
+    """)
+    new_id = db.execute(
+        query,
+        {
+            "date": payload.date,
+            "item": payload.item,
+            "amount": payload.amount,
+        },
+    ).scalar_one()
     db.commit()
 
     return {

@@ -11,8 +11,6 @@ from fastapi import Header, HTTPException
 from app.config import get_settings
 
 
-# API key verification dependency used to protect write and AI endpoints.
-# Uses constant-time comparison for security.
 def verify_shortcut_api_key(
     x_api_key: str = Header(..., description="API key from iPhone Shortcuts / trusted clients"),
 ) -> None:
