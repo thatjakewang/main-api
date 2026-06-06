@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Taipei"
     monthly_income: str | None = None
     monthly_fixed_expenses: str | None = None
-    tesla_odometer_km: int = 21471
+    tesla_odometer_km: int = 22937
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
