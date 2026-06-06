@@ -36,6 +36,23 @@ class CarExpenseCreate(BaseModel):
     amount: int = Field(ge=0)
 
 
+class OdometerReadingCreate(BaseModel):
+    """Payload for logging a total-odometer reading (the number shown on the car screen)."""
+    reading_km: int = Field(ge=0)
+    reading_date: date = Field(default_factory=date.today)
+
+
+def get_latest_odometer(db: Session) -> int:
+    """Return the most recent odometer reading, or the config seed if none exist yet."""
+    reading = db.execute(text("""
+        SELECT reading_km
+        FROM odometer_readings
+        ORDER BY reading_date DESC, created_at DESC, id DESC
+        LIMIT 1
+    """)).scalar()
+    return int(reading) if reading is not None else settings.tesla_odometer_km
+
+
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
     """Return high-level Tesla cost statistics (public).
@@ -65,7 +82,7 @@ def get_stats(db: Session = Depends(get_db)):
     total_cost = car_expense_total + charging_cost
     avg_price_per_kwh = round(charging_cost / energy_kwh, 2) if energy_kwh else 0
 
-    odometer_km = settings.tesla_odometer_km
+    odometer_km = get_latest_odometer(db)
     cost_per_km = round(total_cost / odometer_km, 2) if odometer_km else 0
 
     return {
@@ -273,5 +290,65 @@ def create_car_expense(
             "date": payload.date.isoformat(),
             "item": payload.item,
             "amount": payload.amount,
+        },
+    }
+
+
+@router.get("/odometer/current")
+def get_current_odometer(db: Session = Depends(get_db)):
+    """Return the latest known total odometer in km (public, for the dashboard)."""
+    return {"odometer_km": get_latest_odometer(db)}
+
+
+@router.get("/odometer/recent")
+def get_recent_odometer_readings(db: Session = Depends(get_db)):
+    """Return the 10 most recent odometer readings (newest first). Public."""
+    query = text("""
+        SELECT id, reading_km, reading_date, created_at
+        FROM odometer_readings
+        ORDER BY reading_date DESC, created_at DESC, id DESC
+        LIMIT 10
+    """)
+    rows = db.execute(query).mappings().all()
+
+    return [
+        {
+            "id": row["id"],
+            "reading_km": int(row["reading_km"]),
+            "reading_date": row["reading_date"].isoformat() if row["reading_date"] else None,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/odometer")
+def create_odometer_reading(
+    payload: OdometerReadingCreate,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_shortcut_api_key),
+):
+    """Log a total-odometer reading (protected by x-api-key).
+
+    reading_km is the cumulative number shown on the Tesla screen; cost-per-km
+    in /stats automatically follows the latest reading.
+    """
+    new_id = db.execute(
+        text("""
+            INSERT INTO odometer_readings (reading_km, reading_date)
+            VALUES (:reading_km, :reading_date)
+            RETURNING id
+        """),
+        {"reading_km": payload.reading_km, "reading_date": payload.reading_date},
+    ).scalar_one()
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Odometer reading created",
+        "data": {
+            "id": new_id,
+            "reading_km": payload.reading_km,
+            "reading_date": payload.reading_date.isoformat(),
         },
     }
