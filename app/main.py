@@ -7,7 +7,7 @@ and exposes basic health/root endpoints. The real business logic lives in the ro
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import life, tesla
+from app.routers import life, tesla, workout
 
 app = FastAPI(
     title="My Tesla Analytics API",
@@ -51,3 +51,6 @@ app.include_router(tesla.router, prefix="/api/tesla", tags=["Tesla"])
 
 # Daily life expenses + AI summaries (some endpoints public, AI ones protected)
 app.include_router(life.router, prefix="/api/life", tags=["Life"])
+
+# Fitness workout logging
+app.include_router(workout.router, prefix="/api/workout", tags=["Workout"])
