@@ -23,7 +23,6 @@ app.add_middleware(
         "http://127.0.0.1:5001",
         "http://localhost:5001",
     ],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

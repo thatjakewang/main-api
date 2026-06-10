@@ -1,6 +1,8 @@
 # Tesla Analytics API
 
-A personal Tesla cost-tracking backend that records charging sessions and car expenses, serving data to a frontend dashboard.
+A personal backend that records Tesla charging sessions / car expenses, daily life
+expenses, and workout logs, serving data to a frontend dashboard. Writes come from
+iPhone Shortcuts (protected by an API key).
 
 ## Stack
 
@@ -8,6 +10,20 @@ A personal Tesla cost-tracking backend that records charging sessions and car ex
 - **PostgreSQL** — database
 - **SQLAlchemy** — database connection
 - **uvicorn** — ASGI server
+
+## Project Layout
+
+```text
+app/
+  main.py          # FastAPI app, CORS, router mounting
+  config.py        # pydantic-settings configuration (.env)
+  database.py      # engine + per-request session
+  dependencies.py  # x-api-key verification
+  utils.py         # row serialization, response envelope, date helpers
+  routers/         # thin HTTP route handlers (tesla / life / workout)
+  services/        # business logic (AI expense summaries)
+migrations/        # one-off, idempotent schema scripts
+```
 
 ## Environment Variables
 
@@ -68,6 +84,16 @@ You can run the script before or after restarting the API service (the API endpo
 | GET | `/api/tesla/charging/providers` | Charging cost grouped by provider |
 | GET | `/api/tesla/charging/monthly-trend` | Monthly charging trend |
 | GET | `/api/tesla/charging/recent` | Recent 10 charging records (newest first) |
+| GET | `/api/tesla/odometer/current` | Latest known odometer reading (km) |
+| GET | `/api/tesla/odometer/recent` | Recent 10 odometer readings (newest first) |
+| GET | `/api/life/health` | Life router health check |
+| GET | `/api/life/expenses/recent` | Recent 10 daily expenses (newest first) |
+| GET | `/api/life/expenses/summary` | Current-month total + record count |
+| GET | `/api/life/expenses/category` | Current-month totals grouped by category |
+| GET | `/api/workout/logs/recent` | Recent 10 workout sets (newest first) |
+| GET | `/api/workout/stats` | Current-month workout days / sets / volume |
+| GET | `/api/workout/exercises/prs` | Per-exercise personal records |
+| GET | `/api/workout/volume/monthly` | Monthly training volume trend |
 
 > Note: `charging_records` and `car_expenses` tables were extended with `id` (SERIAL) and `created_at` (for stable recent ordering, matching `daily_expenses`).
 > The `/charging/recent`, `/expenses/recent`, and the two create endpoints are backward-compatible:
@@ -80,11 +106,18 @@ You can run the script before or after restarting the API service (the API endpo
 |--------|------|-------------|
 | POST | `/api/tesla/charging-records` | Create a charging record |
 | POST | `/api/tesla/car-expenses` | Create a car expense |
+| POST | `/api/tesla/odometer` | Log a total-odometer reading |
 | POST | `/api/life/expenses` | Create a daily expense |
-| GET | `/api/life/expenses/daily-ai-summary` | Create an AI daily expense summary JSON response |
-| GET | `/api/life/expenses/daily-ai-summary/message` | Create an AI daily expense summary plain text message |
-| GET | `/api/life/expenses/monthly-ai-summary` | Create an AI monthly expense summary JSON response |
-| GET | `/api/life/expenses/monthly-ai-summary/message` | Create an AI monthly expense summary plain text message |
+| POST | `/api/workout/logs` | Record one workout set (free-form exercise name) |
+| GET | `/api/life/expenses/daily-ai-summary` | AI daily expense summary (JSON) |
+| GET | `/api/life/expenses/daily-ai-summary/message` | AI daily expense summary (plain text) |
+| GET | `/api/life/expenses/monthly-ai-summary` | AI monthly expense summary (JSON) |
+| GET | `/api/life/expenses/monthly-ai-summary/message` | AI monthly expense summary (plain text) |
+
+> Error convention for the AI summary endpoints: the JSON endpoints follow standard HTTP
+> semantics and return **502** with a detail message when the AI call fails; the `/message`
+> endpoints always return **HTTP 200** readable text (`AI summary failed: ...` on failure),
+> so iPhone Shortcuts can forward the body directly without parsing errors.
 
 ### POST `/api/tesla/charging-records`
 
@@ -97,7 +130,7 @@ You can run the script before or after restarting the API service (the API endpo
 }
 ```
 
-Response includes `id` (may be null until migration run):
+Response includes `id`:
 
 ```json
 {
@@ -117,7 +150,7 @@ Response includes `id` (may be null until migration run):
 }
 ```
 
-Response includes `id` (may be null until migration run):
+Response includes `id`:
 
 ```json
 {
@@ -127,9 +160,35 @@ Response includes `id` (may be null until migration run):
 }
 ```
 
+### POST `/api/tesla/odometer`
+
+```json
+{
+  "reading_km": 23120,
+  "reading_date": "2026-06-09"
+}
+```
+
+`reading_date` is optional (defaults to today). Cost-per-km in `/api/tesla/stats`
+automatically follows the latest reading.
+
+### POST `/api/workout/logs`
+
+```json
+{
+  "exercise_name": "Barbell Bench Press",
+  "weight_kg": 60,
+  "reps": 8,
+  "date": "2026-06-09"
+}
+```
+
+`exercise_name` is free-form text (any non-empty name is accepted), so new
+exercises can be added from the iPhone Shortcut without changing the API.
+
 ### GET `/api/life/expenses/monthly-ai-summary`
 
-Returns a short Traditional Chinese monthly expense analysis for iPhone Shortcuts to send via iMessage.
+Returns a short English monthly expense analysis for iPhone Shortcuts to send via iMessage.
 
 Headers:
 

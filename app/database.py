@@ -30,11 +30,15 @@ SessionLocal = sessionmaker(
 def get_db():
     """FastAPI dependency that yields a SQLAlchemy session for a single request.
 
-    The session is automatically closed after the request (even on exceptions).
-    Standard request-scoped DB session pattern for FastAPI + SQLAlchemy.
+    The session is rolled back if the request raises (so a failed write never
+    leaves a dangling transaction) and always closed afterwards. Standard
+    request-scoped DB session pattern for FastAPI + SQLAlchemy.
     """
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

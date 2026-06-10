@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import verify_shortcut_api_key
+from app.utils import serialize_row, success_response
 
 router = APIRouter()
 settings = get_settings()
@@ -58,7 +59,7 @@ def get_stats(db: Session = Depends(get_db)):
     """Return high-level Tesla cost statistics (public).
 
     Includes lifetime totals, average price per kWh, and cost per km based on
-    the configured TESLA_ODOMETER_KM. All queries are simple aggregates over the
+    the latest odometer reading. All queries are simple aggregates over the
     entire history (personal use, tables stay small).
     """
     expense_query = text("""
@@ -182,17 +183,7 @@ def get_recent_charging_records(db: Session = Depends(get_db)):
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {
-            "id": row["id"],
-            "charge_date": row["charge_date"].isoformat() if row["charge_date"] else None,
-            "provider": row["provider"],
-            "amount": int(row["amount"]) if row["amount"] is not None else 0,
-            "kwh": round(float(row["kwh"] or 0), 2),
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        }
-        for row in rows
-    ]
+    return [serialize_row(row) for row in rows]
 
 
 @router.get("/expenses/recent")
@@ -206,16 +197,7 @@ def get_recent_car_expenses(db: Session = Depends(get_db)):
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {
-            "id": row["id"],
-            "date": row["date"].isoformat() if row["date"] else None,
-            "item": row["item"],
-            "amount": int(row["amount"]) if row["amount"] is not None else 0,
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        }
-        for row in rows
-    ]
+    return [serialize_row(row) for row in rows]
 
 
 @router.post("/charging-records")
@@ -244,17 +226,16 @@ def create_charging_record(
     ).scalar_one()
     db.commit()
 
-    return {
-        "status": "success",
-        "message": "Charging record created",
-        "data": {
+    return success_response(
+        "Charging record created",
+        {
             "id": new_id,
             "charge_date": payload.charge_date.isoformat(),
             "provider": payload.provider,
             "amount": payload.amount,
             "kwh": payload.kwh,
         },
-    }
+    )
 
 
 @router.post("/car-expenses")
@@ -282,16 +263,15 @@ def create_car_expense(
     ).scalar_one()
     db.commit()
 
-    return {
-        "status": "success",
-        "message": "Car expense created",
-        "data": {
+    return success_response(
+        "Car expense created",
+        {
             "id": new_id,
             "date": payload.date.isoformat(),
             "item": payload.item,
             "amount": payload.amount,
         },
-    }
+    )
 
 
 @router.get("/odometer/current")
@@ -311,15 +291,7 @@ def get_recent_odometer_readings(db: Session = Depends(get_db)):
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {
-            "id": row["id"],
-            "reading_km": int(row["reading_km"]),
-            "reading_date": row["reading_date"].isoformat() if row["reading_date"] else None,
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        }
-        for row in rows
-    ]
+    return [serialize_row(row) for row in rows]
 
 
 @router.post("/odometer")
@@ -343,12 +315,11 @@ def create_odometer_reading(
     ).scalar_one()
     db.commit()
 
-    return {
-        "status": "success",
-        "message": "Odometer reading created",
-        "data": {
+    return success_response(
+        "Odometer reading created",
+        {
             "id": new_id,
             "reading_km": payload.reading_km,
             "reading_date": payload.reading_date.isoformat(),
         },
-    }
+    )
