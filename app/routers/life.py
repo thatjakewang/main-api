@@ -206,6 +206,43 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/expenses/monthly")
+def get_monthly_expenses(db: Session = Depends(get_db)):
+    """Return month-by-month spending totals for the last 12 months (public).
+
+    Covers the current month plus the 11 before it (timezone-aware month
+    boundaries), ordered chronologically. Months with no records are simply
+    absent. Powers the Monthly Spending chart on the MyLife dashboard.
+    """
+    month_start = get_month_start()
+    # First day of the month 11 months before the current one
+    year, month = month_start.year, month_start.month - 11
+    if month <= 0:
+        year, month = year - 1, month + 12
+    start = month_start.replace(year=year, month=month)
+
+    query = text("""
+        SELECT
+            TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS month,
+            COALESCE(SUM(amount), 0) AS total_amount,
+            COUNT(*) AS record_count
+        FROM daily_expenses
+        WHERE date >= :start
+        GROUP BY DATE_TRUNC('month', date)
+        ORDER BY DATE_TRUNC('month', date)
+    """)
+    rows = db.execute(query, {"start": start}).mappings().all()
+
+    return [
+        {
+            "month": row["month"],
+            "total_amount": int(row["total_amount"] or 0),
+            "record_count": int(row["record_count"] or 0),
+        }
+        for row in rows
+    ]
+
+
 @router.get("/expenses/daily-ai-summary")
 def get_daily_expense_ai_summary(
     target_date: date | None = None,
