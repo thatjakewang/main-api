@@ -7,7 +7,7 @@ response envelopes, and date helpers live in app/utils.py.
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -25,6 +25,8 @@ from app.utils import (
     get_today,
     serialize_row,
     success_response,
+    summary_or_http_error,
+    summary_to_plain_text,
 )
 
 router = APIRouter()
@@ -36,35 +38,6 @@ class DailyExpenseCreate(BaseModel):
     category: str
     amount: int = Field(ge=0)
     payment_method: str | None = None
-
-
-def _summary_or_http_error(summary: dict) -> dict:
-    """Enforce the JSON error convention for AI summary endpoints.
-
-    JSON endpoints follow standard HTTP semantics: an AI failure becomes a 502
-    (Bad Gateway, upstream AI provider failed) instead of a 200 with an embedded
-    error. The /message endpoints keep returning HTTP 200 readable text so
-    iPhone Shortcuts can forward the body directly.
-    """
-    if summary.get("status") == "error":
-        raise HTTPException(
-            status_code=502,
-            detail=f"AI summary failed: {summary.get('error', 'unknown error')}",
-        )
-
-    return summary
-
-
-def _summary_to_plain_text(summary: dict) -> PlainTextResponse:
-    """Convert a summary dict from the AI service into a plain-text response.
-
-    Handles the error case gracefully so Shortcuts clients always receive
-    readable text instead of a JSON error or a KeyError.
-    """
-    if summary.get("status") == "error":
-        return PlainTextResponse(f"AI summary failed: {summary.get('error', 'unknown error')}")
-
-    return PlainTextResponse(summary["message"])
 
 
 @router.get("/health")
@@ -319,7 +292,7 @@ def get_daily_expense_ai_summary(
     text or a no-record message. AI failures raise HTTP 502.
     """
     report_date = target_date or get_today()
-    return _summary_or_http_error(build_daily_expense_summary(report_date, db))
+    return summary_or_http_error(build_daily_expense_summary(report_date, db))
 
 
 @router.get("/expenses/daily-ai-summary/message", response_class=PlainTextResponse)
@@ -333,7 +306,7 @@ def get_daily_expense_ai_summary_message(
     Protected endpoint.
     """
     report_date = target_date or get_today()
-    return _summary_to_plain_text(build_daily_expense_summary(report_date, db))
+    return summary_to_plain_text(build_daily_expense_summary(report_date, db))
 
 
 @router.get("/expenses/monthly-ai-summary")
@@ -348,7 +321,7 @@ def get_monthly_expense_ai_summary(
     (or a safe fallback / no-record message). AI failures raise HTTP 502.
     """
     month_start = get_month_start(target_month)
-    return _summary_or_http_error(build_monthly_expense_summary(month_start, db))
+    return summary_or_http_error(build_monthly_expense_summary(month_start, db))
 
 
 @router.get("/expenses/monthly-ai-summary/message", response_class=PlainTextResponse)
@@ -362,4 +335,4 @@ def get_monthly_expense_ai_summary_message(
     Protected endpoint.
     """
     month_start = get_month_start(target_month)
-    return _summary_to_plain_text(build_monthly_expense_summary(month_start, db))
+    return summary_to_plain_text(build_monthly_expense_summary(month_start, db))

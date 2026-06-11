@@ -4,6 +4,7 @@ Keeps routers thin and responses consistent:
 - serialize_value / serialize_row : convert raw DB values into JSON-friendly ones
 - success_response                : standard envelope for all write (POST) endpoints
 - get_today / get_month_start / get_next_month_start : timezone-aware date helpers
+- summary_or_http_error / summary_to_plain_text : response shaping for AI summary endpoints
 """
 
 from datetime import date, datetime
@@ -11,6 +12,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
+from fastapi.responses import PlainTextResponse
 
 from app.config import get_settings
 
@@ -90,3 +92,32 @@ def get_next_month_start(month_start: date) -> date:
         return date(month_start.year + 1, 1, 1)
 
     return date(month_start.year, month_start.month + 1, 1)
+
+
+def summary_or_http_error(summary: dict) -> dict:
+    """Enforce the JSON error convention for AI summary endpoints.
+
+    JSON endpoints follow standard HTTP semantics: an AI failure becomes a 502
+    (Bad Gateway, upstream AI provider failed) instead of a 200 with an embedded
+    error. The /message endpoints keep returning HTTP 200 readable text so
+    iPhone Shortcuts can forward the body directly.
+    """
+    if summary.get("status") == "error":
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI summary failed: {summary.get('error', 'unknown error')}",
+        )
+
+    return summary
+
+
+def summary_to_plain_text(summary: dict) -> PlainTextResponse:
+    """Convert a summary dict from the AI service into a plain-text response.
+
+    Handles the error case gracefully so Shortcuts clients always receive
+    readable text instead of a JSON error or a KeyError.
+    """
+    if summary.get("status") == "error":
+        return PlainTextResponse(f"AI summary failed: {summary.get('error', 'unknown error')}")
+
+    return PlainTextResponse(summary["message"])

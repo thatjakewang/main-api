@@ -9,6 +9,8 @@ Endpoints:
 - GET  /exercises/monthly-sets : current-month sets per exercise (public)
 - GET  /volume/weekly     : week-by-week training volume trend (public)
 - GET  /days              : per-day volume for the calendar heatmap (public)
+- GET  /ai-summary        : AI daily workout summary, JSON (protected)
+- GET  /ai-summary/message : AI daily workout summary, plain text (protected)
 
 Exercise names are free-form text (no server-side whitelist), so new exercises
 can be added from the iPhone Shortcut without touching the API.
@@ -17,12 +19,14 @@ can be added from the iPhone Shortcut without touching the API.
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import verify_shortcut_api_key
+from app.services.ai_summary import build_daily_workout_summary
 from app.utils import (
     get_month_start,
     get_next_month_start,
@@ -30,6 +34,8 @@ from app.utils import (
     serialize_row,
     serialize_value,
     success_response,
+    summary_or_http_error,
+    summary_to_plain_text,
 )
 
 router = APIRouter()
@@ -292,3 +298,32 @@ def get_workout_days(db: Session = Depends(get_db)):
         }
         for row in rows
     ]
+
+
+@router.get("/ai-summary")
+def get_daily_workout_ai_summary(
+    target_date: date | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_shortcut_api_key),
+):
+    """Generate a daily AI workout summary (JSON) for the given (or today's) date.
+
+    Protected endpoint. The "message" field contains the AI-generated English
+    text or a no-record message. AI failures raise HTTP 502.
+    """
+    report_date = target_date or get_today()
+    return summary_or_http_error(build_daily_workout_summary(report_date, db))
+
+
+@router.get("/ai-summary/message", response_class=PlainTextResponse)
+def get_daily_workout_ai_summary_message(
+    target_date: date | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_shortcut_api_key),
+):
+    """Return only the AI daily workout summary as plain text (for iPhone Shortcuts).
+
+    Protected endpoint.
+    """
+    report_date = target_date or get_today()
+    return summary_to_plain_text(build_daily_workout_summary(report_date, db))
