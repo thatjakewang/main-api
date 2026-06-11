@@ -172,6 +172,81 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/monthly-summary")
+def get_monthly_summary(db: Session = Depends(get_db)):
+    """Return month-by-month cost & efficiency summary (public).
+
+    Combines all three tables per calendar month:
+    - charging_records : charging cost + energy charged
+    - car_expenses     : all other car spending
+    - odometer_readings: km driven = this month's last reading minus the
+      previous reading-month's last reading (gaps between reading months are
+      attributed to the later month)
+
+    Derived fields (cost_per_km, kwh_per_100km) are null when a month has no
+    odometer delta to divide by; months with no activity at all are absent.
+    Powers the Monthly Driving Cost / Efficiency / Cumulative Cost charts.
+    """
+    charging_rows = db.execute(text("""
+        SELECT
+            TO_CHAR(DATE_TRUNC('month', charge_date), 'YYYY-MM') AS month,
+            SUM(amount) AS amount,
+            SUM(kwh) AS kwh
+        FROM charging_records
+        GROUP BY DATE_TRUNC('month', charge_date)
+    """)).mappings().all()
+
+    expense_rows = db.execute(text("""
+        SELECT
+            TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS month,
+            SUM(amount) AS amount
+        FROM car_expenses
+        GROUP BY DATE_TRUNC('month', date)
+    """)).mappings().all()
+
+    odometer_rows = db.execute(text("""
+        SELECT
+            TO_CHAR(DATE_TRUNC('month', reading_date), 'YYYY-MM') AS month,
+            MAX(reading_km) AS reading_km
+        FROM odometer_readings
+        GROUP BY DATE_TRUNC('month', reading_date)
+        ORDER BY DATE_TRUNC('month', reading_date)
+    """)).mappings().all()
+
+    # km driven per month: delta between consecutive reading months
+    km_by_month: dict[str, int] = {}
+    prev_reading = None
+    for row in odometer_rows:
+        reading = int(row["reading_km"])
+        if prev_reading is not None:
+            km_by_month[row["month"]] = reading - prev_reading
+        prev_reading = reading
+
+    charging_by_month = {row["month"]: row for row in charging_rows}
+    expenses_by_month = {row["month"]: int(row["amount"] or 0) for row in expense_rows}
+
+    months = sorted(set(charging_by_month) | set(expenses_by_month) | set(km_by_month))
+
+    result = []
+    for month in months:
+        charging = charging_by_month.get(month)
+        charging_amount = int(charging["amount"] or 0) if charging else 0
+        kwh = float(charging["kwh"] or 0) if charging else 0.0
+        total_cost = charging_amount + expenses_by_month.get(month, 0)
+        km = km_by_month.get(month)
+
+        result.append({
+            "month": month,
+            "km_driven": km,
+            "total_cost": total_cost,
+            "cost_per_km": round(total_cost / km, 2) if km else None,
+            "kwh": round(kwh, 1),
+            "kwh_per_100km": round(kwh / km * 100, 1) if km else None,
+        })
+
+    return result
+
+
 @router.get("/charging/recent")
 def get_recent_charging_records(db: Session = Depends(get_db)):
     """Return the 10 most recent charging records (newest first). Public."""

@@ -5,7 +5,7 @@ All AI summary logic lives in app/services/ai_summary.py; shared serialization,
 response envelopes, and date helpers live in app/utils.py.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -163,10 +163,34 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
         query, {"month_start": month_start, "next_month_start": next_month_start}
     ).mappings().one()
 
+    # Same-period total for the previous month (1st through the same day
+    # number, clamped to the previous month's length) so the dashboard can
+    # show a fair month-over-month comparison mid-month.
+    today = get_today()
+    days_elapsed = (today - month_start).days + 1  # incl. today
+    prev_month_start = get_month_start(
+        (month_start - timedelta(days=1)).strftime("%Y-%m")
+    )
+    prev_period_end = min(
+        prev_month_start + timedelta(days=days_elapsed),
+        get_next_month_start(prev_month_start),
+    )
+
+    prev_query = text("""
+        SELECT COALESCE(SUM(amount), 0) AS total_amount
+        FROM daily_expenses
+        WHERE date >= :start
+          AND date < :end
+    """)
+    prev_total = db.execute(
+        prev_query, {"start": prev_month_start, "end": prev_period_end}
+    ).scalar()
+
     return {
         "month": month_label,
         "total_amount": int(row["total_amount"] or 0),
         "record_count": int(row["record_count"] or 0),
+        "prev_month_to_date": int(prev_total or 0),
     }
 
 
@@ -208,11 +232,12 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
 
 @router.get("/expenses/monthly")
 def get_monthly_expenses(db: Session = Depends(get_db)):
-    """Return month-by-month spending totals for the last 12 months (public).
+    """Return month-by-month spending for the last 12 months, with a
+    per-category breakdown for each month (public).
 
     Covers the current month plus the 11 before it (timezone-aware month
     boundaries), ordered chronologically. Months with no records are simply
-    absent. Powers the Monthly Spending chart on the MyLife dashboard.
+    absent. Powers the stacked Monthly Spending chart on the MyLife dashboard.
     """
     month_start = get_month_start()
     # First day of the month 11 months before the current one
@@ -224,22 +249,61 @@ def get_monthly_expenses(db: Session = Depends(get_db)):
     query = text("""
         SELECT
             TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS month,
+            category,
             COALESCE(SUM(amount), 0) AS total_amount,
             COUNT(*) AS record_count
         FROM daily_expenses
         WHERE date >= :start
-        GROUP BY DATE_TRUNC('month', date)
+        GROUP BY DATE_TRUNC('month', date), category
         ORDER BY DATE_TRUNC('month', date)
     """)
     rows = db.execute(query, {"start": start}).mappings().all()
 
+    # Fold category rows into one entry per month
+    months: dict[str, dict] = {}
+    for row in rows:
+        entry = months.setdefault(
+            row["month"],
+            {"month": row["month"], "total_amount": 0, "record_count": 0, "categories": {}},
+        )
+        amount = int(row["total_amount"] or 0)
+        entry["total_amount"] += amount
+        entry["record_count"] += int(row["record_count"] or 0)
+        entry["categories"][row["category"]] = amount
+
+    return list(months.values())
+
+
+@router.get("/expenses/weekday")
+def get_expenses_by_weekday(db: Session = Depends(get_db)):
+    """Return average daily spending per weekday over the last 12 weeks (public).
+
+    The window is exactly 84 days ending today, so every weekday occurs
+    exactly 12 times and the averages are directly comparable. All seven
+    weekdays are always returned (zeros included), Monday first.
+    """
+    start = get_today() - timedelta(days=83)
+
+    query = text("""
+        SELECT
+            EXTRACT(ISODOW FROM date)::int AS weekday,
+            COALESCE(SUM(amount), 0) AS total_amount
+        FROM daily_expenses
+        WHERE date >= :start
+        GROUP BY EXTRACT(ISODOW FROM date)
+    """)
+    rows = db.execute(query, {"start": start}).mappings().all()
+    totals = {int(row["weekday"]): int(row["total_amount"] or 0) for row in rows}
+
+    labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return [
         {
-            "month": row["month"],
-            "total_amount": int(row["total_amount"] or 0),
-            "record_count": int(row["record_count"] or 0),
+            "weekday": dow,
+            "label": labels[dow - 1],
+            "total_amount": totals.get(dow, 0),
+            "avg_amount": round(totals.get(dow, 0) / 12),
         }
-        for row in rows
+        for dow in range(1, 8)
     ]
 
 

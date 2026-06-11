@@ -6,6 +6,7 @@ Endpoints:
 - GET  /stats             : current-month KPI numbers (public)
 - GET  /exercises/prs     : per-exercise personal records (public)
 - GET  /exercises/history : per-day progression for one exercise (public)
+- GET  /exercises/monthly-sets : current-month sets per exercise (public)
 - GET  /volume/weekly     : week-by-week training volume trend (public)
 - GET  /days              : per-day volume for the calendar heatmap (public)
 
@@ -186,6 +187,41 @@ def get_exercise_history(
         {
             "date": serialize_value(row["date"]),
             "max_weight_kg": float(row["max_weight_kg"]),
+            "total_volume_kg": round(float(row["total_volume_kg"] or 0)),
+        }
+        for row in rows
+    ]
+
+
+@router.get("/exercises/monthly-sets")
+def get_monthly_sets_per_exercise(db: Session = Depends(get_db)):
+    """Return current-month sets and volume per exercise, most sets first (public).
+
+    Powers the Sets by Exercise chart — a quick balance check on whether any
+    movement pattern is being over- or under-trained this month.
+    """
+    month_start = get_month_start()
+    next_month_start = get_next_month_start(month_start)
+
+    query = text("""
+        SELECT
+            exercise_name,
+            COUNT(*) AS total_sets,
+            COALESCE(SUM(weight_kg * reps), 0) AS total_volume_kg
+        FROM workout_logs
+        WHERE date >= :month_start
+          AND date < :next_month_start
+        GROUP BY exercise_name
+        ORDER BY total_sets DESC
+    """)
+    rows = db.execute(
+        query, {"month_start": month_start, "next_month_start": next_month_start}
+    ).mappings().all()
+
+    return [
+        {
+            "exercise_name": row["exercise_name"],
+            "total_sets": int(row["total_sets"]),
             "total_volume_kg": round(float(row["total_volume_kg"] or 0)),
         }
         for row in rows
