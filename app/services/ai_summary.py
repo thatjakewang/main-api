@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.services.expense_stats import expense_categories, expense_daily_totals, expense_totals
 from app.utils import get_next_month_start
 
 settings = get_settings()
@@ -275,68 +276,13 @@ def build_monthly_expense_summary(month_start: date, db: Session) -> dict:
     next_month_start = get_next_month_start(month_start)
     month_label = month_start.strftime("%Y-%m")
 
-    # Total spend and count for the whole target month
-    summary_query = text("""
-        SELECT
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :month_start
-          AND date < :next_month_start
-    """)
+    # All three query shapes are shared with the dashboard endpoints via expense_stats
+    totals = expense_totals(db, month_start, next_month_start)
+    categories = expense_categories(db, month_start, next_month_start)
+    daily_totals = expense_daily_totals(db, month_start, next_month_start)
 
-    # Breakdown by category for the month
-    category_query = text("""
-        SELECT
-            category,
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :month_start
-          AND date < :next_month_start
-        GROUP BY category
-        ORDER BY total_amount DESC
-    """)
-
-    # Daily totals inside the month (used by AI to spot concentration on certain days)
-    daily_query = text("""
-        SELECT
-            date,
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :month_start
-          AND date < :next_month_start
-        GROUP BY date
-        ORDER BY date
-    """)
-
-    query_params = {
-        "month_start": month_start,
-        "next_month_start": next_month_start,
-    }
-    summary_row = db.execute(summary_query, query_params).mappings().one()
-    category_rows = db.execute(category_query, query_params).mappings().all()
-    daily_rows = db.execute(daily_query, query_params).mappings().all()
-
-    total_amount = int(summary_row["total_amount"] or 0)
-    record_count = int(summary_row["record_count"] or 0)
-    categories = [
-        {
-            "category": row["category"],
-            "total_amount": int(row["total_amount"] or 0),
-            "record_count": int(row["record_count"] or 0),
-        }
-        for row in category_rows
-    ]
-    daily_totals = [
-        {
-            "date": row["date"].isoformat(),
-            "total_amount": int(row["total_amount"] or 0),
-            "record_count": int(row["record_count"] or 0),
-        }
-        for row in daily_rows
-    ]
+    total_amount = totals["total_amount"]
+    record_count = totals["record_count"]
     budget_context = get_monthly_budget_context(total_amount)
 
     data = {

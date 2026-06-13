@@ -5,7 +5,7 @@ Keeps routers thin and responses consistent:
 - success_response                : standard envelope for all write (POST) endpoints
 - create_record                   : shared INSERT -> commit -> envelope flow for POST endpoints
 - fetch_recent                    : shared "10 most recent rows" query for /recent endpoints
-- get_today / get_month_start / get_next_month_start : timezone-aware date helpers
+- get_today / get_month_start / get_next_month_start / current_month_range : timezone-aware date helpers
 - summary_or_http_error / summary_to_plain_text : response shaping for AI summary endpoints
 - register_ai_summary_pair        : registers the JSON + plain-text endpoint pair for one AI summary
 """
@@ -136,6 +136,16 @@ def get_next_month_start(month_start: date) -> date:
         return date(month_start.year + 1, 1, 1)
 
     return date(month_start.year, month_start.month + 1, 1)
+
+
+def current_month_range() -> tuple[date, date]:
+    """Return (month_start, next_month_start) for the current month (APP_TIMEZONE aware).
+
+    Convenience wrapper used by endpoints that query the current month's data
+    and need both boundaries at once, eliminating the repeated two-liner.
+    """
+    month_start = get_month_start()
+    return month_start, get_next_month_start(month_start)
 
 
 def summary_or_http_error(summary: dict) -> dict:

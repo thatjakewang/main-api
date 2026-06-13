@@ -18,8 +18,10 @@ from app.services.ai_summary import (
     build_daily_expense_summary,
     build_monthly_expense_summary,
 )
+from app.services.expense_stats import expense_categories, expense_totals
 from app.utils import (
     create_record,
+    current_month_range,
     fetch_recent,
     get_month_start,
     get_next_month_start,
@@ -70,22 +72,9 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
     Public endpoint. The month boundary uses get_month_start / get_next_month_start
     so it respects the configured timezone instead of the database server's CURRENT_DATE.
     """
-    month_start = get_month_start()
-    next_month_start = get_next_month_start(month_start)
+    month_start, next_month_start = current_month_range()
     month_label = month_start.strftime("%Y-%m")
-
-    query = text("""
-        SELECT
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :month_start
-          AND date < :next_month_start
-    """)
-
-    row = db.execute(
-        query, {"month_start": month_start, "next_month_start": next_month_start}
-    ).mappings().one()
+    totals = expense_totals(db, month_start, next_month_start)
 
     # Same-period total for the previous month (1st through the same day
     # number, clamped to the previous month's length) so the dashboard can
@@ -112,8 +101,8 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
 
     return {
         "month": month_label,
-        "total_amount": int(row["total_amount"] or 0),
-        "record_count": int(row["record_count"] or 0),
+        "total_amount": totals["total_amount"],
+        "record_count": totals["record_count"],
         "prev_month_to_date": int(prev_total or 0),
     }
 
@@ -125,33 +114,8 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
     Public endpoint. Uses timezone-aware month boundaries for consistency with
     other summary endpoints.
     """
-    month_start = get_month_start()
-    next_month_start = get_next_month_start(month_start)
-
-    query = text("""
-        SELECT
-            category,
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :month_start
-          AND date < :next_month_start
-        GROUP BY category
-        ORDER BY total_amount DESC
-    """)
-
-    rows = db.execute(
-        query, {"month_start": month_start, "next_month_start": next_month_start}
-    ).mappings().all()
-
-    return [
-        {
-            "category": row["category"],
-            "total_amount": int(row["total_amount"] or 0),
-            "record_count": int(row["record_count"] or 0),
-        }
-        for row in rows
-    ]
+    month_start, next_month_start = current_month_range()
+    return expense_categories(db, month_start, next_month_start)
 
 
 @router.get("/expenses/monthly")

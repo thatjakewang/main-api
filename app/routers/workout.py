@@ -28,9 +28,8 @@ from app.dependencies import verify_shortcut_api_key
 from app.services.ai_summary import build_daily_workout_summary
 from app.utils import (
     create_record,
+    current_month_range,
     fetch_recent,
-    get_month_start,
-    get_next_month_start,
     get_today,
     register_ai_summary_pair,
     serialize_row,
@@ -84,8 +83,7 @@ def get_workout_stats(db: Session = Depends(get_db)):
     (APP_TIMEZONE aware, same month boundaries as the life endpoints);
     last_workout_date is all-time.
     """
-    month_start = get_month_start()
-    next_month_start = get_next_month_start(month_start)
+    month_start, next_month_start = current_month_range()
 
     month_query = text("""
         SELECT
@@ -177,8 +175,7 @@ def get_monthly_sets_per_exercise(db: Session = Depends(get_db)):
     Powers the Sets by Exercise chart — a quick balance check on whether any
     movement pattern is being over- or under-trained this month.
     """
-    month_start = get_month_start()
-    next_month_start = get_next_month_start(month_start)
+    month_start, next_month_start = current_month_range()
 
     query = text("""
         SELECT
