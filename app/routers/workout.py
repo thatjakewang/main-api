@@ -142,19 +142,21 @@ def get_exercise_history(
 ):
     """Return per-day progression for one exercise, oldest first (public).
 
-    For each day the exercise was performed: the heaviest set of the day and
-    the day's total volume. Powers the progression line chart; the frontend
-    picks `name` from the /exercises/prs list, so exact match is fine.
+    For each day: the heaviest set (weight + reps), total day volume.
+    DISTINCT ON picks the heaviest set per day (ties broken by most reps);
+    the window function computes total volume before deduplication.
+    max_weight_reps is included so the frontend can compute estimated 1RM
+    via the Epley formula without a separate API call.
     """
     query = text("""
-        SELECT
+        SELECT DISTINCT ON (date)
             date,
-            MAX(weight_kg) AS max_weight_kg,
-            COALESCE(SUM(weight_kg * reps), 0) AS total_volume_kg
+            weight_kg AS max_weight_kg,
+            reps AS max_weight_reps,
+            COALESCE(SUM(weight_kg * reps) OVER (PARTITION BY date), 0) AS total_volume_kg
         FROM workout_logs
         WHERE exercise_name = :name
-        GROUP BY date
-        ORDER BY date
+        ORDER BY date ASC, weight_kg DESC, reps DESC
     """)
     rows = db.execute(query, {"name": name}).mappings().all()
 
@@ -162,6 +164,7 @@ def get_exercise_history(
         {
             "date": serialize_value(row["date"]),
             "max_weight_kg": float(row["max_weight_kg"]),
+            "max_weight_reps": int(row["max_weight_reps"]),
             "total_volume_kg": round(float(row["total_volume_kg"] or 0)),
         }
         for row in rows
