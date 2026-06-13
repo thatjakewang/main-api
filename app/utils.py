@@ -3,18 +3,26 @@
 Keeps routers thin and responses consistent:
 - serialize_value / serialize_row : convert raw DB values into JSON-friendly ones
 - success_response                : standard envelope for all write (POST) endpoints
+- create_record                   : shared INSERT -> commit -> envelope flow for POST endpoints
+- fetch_recent                    : shared "10 most recent rows" query for /recent endpoints
 - get_today / get_month_start / get_next_month_start : timezone-aware date helpers
 - summary_or_http_error / summary_to_plain_text : response shaping for AI summary endpoints
+- register_ai_summary_pair        : registers the JSON + plain-text endpoint pair for one AI summary
 """
 
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.database import get_db
+from app.dependencies import verify_shortcut_api_key
 
 
 def serialize_value(value):
@@ -43,6 +51,42 @@ def serialize_row(row) -> dict:
 def success_response(message: str, data: dict) -> dict:
     """Standard success envelope returned by all write (POST) endpoints."""
     return {"status": "success", "message": message, "data": data}
+
+
+def create_record(db: Session, insert_sql: str, payload: BaseModel, message: str) -> dict:
+    """Shared body of every write (POST) endpoint.
+
+    Executes an INSERT ... RETURNING statement (parameters come from the
+    payload's fields, so the :placeholders must match the model field names),
+    commits, and returns the standard success envelope echoing the generated
+    columns (id, created_at, ...) plus the submitted payload.
+    """
+    fields = payload.model_dump()
+    returned = db.execute(text(insert_sql), fields).mappings().one()
+    db.commit()
+
+    return success_response(
+        message,
+        {**serialize_row(returned), **{key: serialize_value(value) for key, value in fields.items()}},
+    )
+
+
+def fetch_recent(db: Session, table: str, columns: str, order_col: str = "date") -> list[dict]:
+    """Return the 10 most recent rows of a table (newest first), JSON-ready.
+
+    All /recent endpoints share this exact shape: order by the record's date
+    column, then created_at, then id as tie-breakers. `table` / `columns` /
+    `order_col` are hardcoded by callers (never user input), so building the
+    SQL with an f-string is safe here.
+    """
+    rows = db.execute(text(f"""
+        SELECT {columns}
+        FROM {table}
+        ORDER BY {order_col} DESC, created_at DESC, id DESC
+        LIMIT 10
+    """)).mappings().all()
+
+    return [serialize_row(row) for row in rows]
 
 
 def get_today() -> date:
@@ -121,3 +165,41 @@ def summary_to_plain_text(summary: dict) -> PlainTextResponse:
         return PlainTextResponse(f"AI summary failed: {summary.get('error', 'unknown error')}")
 
     return PlainTextResponse(summary["message"])
+
+
+def register_ai_summary_pair(router, path: str, build_summary, *, by_month: bool = False) -> None:
+    """Register the JSON + plain-text endpoint pair for one AI summary type.
+
+    Every AI summary is exposed twice, always protected by x-api-key:
+    - GET `path`          : full JSON envelope; AI failures become HTTP 502
+    - GET `path`/message  : just the message as plain text, always HTTP 200
+                            (so iPhone Shortcuts can forward the body directly)
+
+    `by_month` switches the optional query parameter from target_date
+    (YYYY-MM-DD, defaults to today) to target_month (YYYY-MM, defaults to the
+    current month). Both interpret dates in APP_TIMEZONE.
+    """
+    if by_month:
+        def resolve_summary(
+            target_month: str | None = None,
+            db: Session = Depends(get_db),
+            _: None = Depends(verify_shortcut_api_key),
+        ) -> dict:
+            return build_summary(get_month_start(target_month), db)
+    else:
+        def resolve_summary(
+            target_date: date | None = None,
+            db: Session = Depends(get_db),
+            _: None = Depends(verify_shortcut_api_key),
+        ) -> dict:
+            return build_summary(target_date or get_today(), db)
+
+    @router.get(path)
+    def ai_summary_json(summary: dict = Depends(resolve_summary)):
+        """Full AI summary as JSON (protected). AI failures raise HTTP 502."""
+        return summary_or_http_error(summary)
+
+    @router.get(f"{path}/message", response_class=PlainTextResponse)
+    def ai_summary_message(summary: dict = Depends(resolve_summary)):
+        """Only the AI summary message as plain text (protected, for Shortcuts)."""
+        return summary_to_plain_text(summary)

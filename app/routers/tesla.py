@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import verify_shortcut_api_key
-from app.utils import serialize_row, success_response
+from app.utils import create_record, fetch_recent, serialize_row
 
 router = APIRouter()
 settings = get_settings()
@@ -100,17 +100,14 @@ def get_stats(db: Session = Depends(get_db)):
 def get_expenses(db: Session = Depends(get_db)):
     """Return car expenses grouped by item (e.g. Insurance, Tires), sorted by total desc. Public."""
     query = text("""
-        SELECT item, SUM(amount) AS total_amount
+        SELECT item, COALESCE(SUM(amount), 0) AS total_amount
         FROM car_expenses
         GROUP BY item
         ORDER BY total_amount DESC
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {"item": row["item"], "total_amount": float(row["total_amount"] or 0)}
-        for row in rows
-    ]
+    return [serialize_row(row) for row in rows]
 
 
 @router.get("/charging/providers")
@@ -123,24 +120,17 @@ def get_charging_by_provider(db: Session = Depends(get_db)):
     query = text("""
         SELECT
             provider,
-            SUM(kwh) AS total_kwh,
-            SUM(amount) AS total_amount,
-            SUM(amount) / NULLIF(SUM(kwh), 0) AS avg_price_per_kwh
+            COALESCE(SUM(kwh), 0) AS total_kwh,
+            COALESCE(SUM(amount), 0) AS total_amount,
+            COALESCE(SUM(amount) / NULLIF(SUM(kwh), 0), 0) AS avg_price_per_kwh
         FROM charging_records
         GROUP BY provider
         ORDER BY total_amount DESC
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {
-            "provider": row["provider"],
-            "total_kwh": round(float(row["total_kwh"] or 0), 2),
-            "total_amount": float(row["total_amount"] or 0),
-            "avg_price_per_kwh": round(float(row["avg_price_per_kwh"] or 0), 2),
-        }
-        for row in rows
-    ]
+    # serialize_row already rounds floats/Decimals to 2 decimals for JSON
+    return [serialize_row(row) for row in rows]
 
 
 @router.get("/charging/monthly-trend")
@@ -152,24 +142,17 @@ def get_monthly_charging_trend(db: Session = Depends(get_db)):
     query = text("""
         SELECT
             TO_CHAR(DATE_TRUNC('month', charge_date), 'YYYY-MM') AS month,
-            SUM(kwh) AS total_kwh,
-            SUM(amount) AS total_amount,
-            SUM(amount) / NULLIF(SUM(kwh), 0) AS avg_price_per_kwh
+            COALESCE(SUM(kwh), 0) AS total_kwh,
+            COALESCE(SUM(amount), 0) AS total_amount,
+            COALESCE(SUM(amount) / NULLIF(SUM(kwh), 0), 0) AS avg_price_per_kwh
         FROM charging_records
         GROUP BY DATE_TRUNC('month', charge_date)
         ORDER BY DATE_TRUNC('month', charge_date)
     """)
     rows = db.execute(query).mappings().all()
 
-    return [
-        {
-            "month": row["month"],
-            "total_kwh": round(float(row["total_kwh"] or 0), 2),
-            "total_amount": float(row["total_amount"] or 0),
-            "avg_price_per_kwh": round(float(row["avg_price_per_kwh"] or 0), 2),
-        }
-        for row in rows
-    ]
+    # serialize_row already rounds floats/Decimals to 2 decimals for JSON
+    return [serialize_row(row) for row in rows]
 
 
 @router.get("/monthly-summary")
@@ -250,29 +233,16 @@ def get_monthly_summary(db: Session = Depends(get_db)):
 @router.get("/charging/recent")
 def get_recent_charging_records(db: Session = Depends(get_db)):
     """Return the 10 most recent charging records (newest first). Public."""
-    query = text("""
-        SELECT id, charge_date, provider, amount, kwh, created_at
-        FROM charging_records
-        ORDER BY charge_date DESC, created_at DESC, id DESC
-        LIMIT 10
-    """)
-    rows = db.execute(query).mappings().all()
-
-    return [serialize_row(row) for row in rows]
+    return fetch_recent(
+        db, "charging_records", "id, charge_date, provider, amount, kwh, created_at",
+        order_col="charge_date",
+    )
 
 
 @router.get("/expenses/recent")
 def get_recent_car_expenses(db: Session = Depends(get_db)):
     """Return the 10 most recent car expense records (newest first). Public."""
-    query = text("""
-        SELECT id, date, item, amount, created_at
-        FROM car_expenses
-        ORDER BY date DESC, created_at DESC, id DESC
-        LIMIT 10
-    """)
-    rows = db.execute(query).mappings().all()
-
-    return [serialize_row(row) for row in rows]
+    return fetch_recent(db, "car_expenses", "id, date, item, amount, created_at")
 
 
 @router.post("/charging-records")
@@ -285,31 +255,15 @@ def create_charging_record(
 
     Used by iPhone Shortcuts or other trusted clients to log a charge session.
     """
-    query = text("""
+    return create_record(
+        db,
+        """
         INSERT INTO charging_records (charge_date, provider, amount, kwh)
         VALUES (:charge_date, :provider, :amount, :kwh)
         RETURNING id
-    """)
-    new_id = db.execute(
-        query,
-        {
-            "charge_date": payload.charge_date,
-            "provider": payload.provider,
-            "amount": payload.amount,
-            "kwh": payload.kwh,
-        },
-    ).scalar_one()
-    db.commit()
-
-    return success_response(
+        """,
+        payload,
         "Charging record created",
-        {
-            "id": new_id,
-            "charge_date": payload.charge_date.isoformat(),
-            "provider": payload.provider,
-            "amount": payload.amount,
-            "kwh": payload.kwh,
-        },
     )
 
 
@@ -323,29 +277,15 @@ def create_car_expense(
 
     Used by Shortcuts etc. to log one-off car costs (tires, insurance, etc.).
     """
-    query = text("""
+    return create_record(
+        db,
+        """
         INSERT INTO car_expenses (date, item, amount)
         VALUES (:date, :item, :amount)
         RETURNING id
-    """)
-    new_id = db.execute(
-        query,
-        {
-            "date": payload.date,
-            "item": payload.item,
-            "amount": payload.amount,
-        },
-    ).scalar_one()
-    db.commit()
-
-    return success_response(
+        """,
+        payload,
         "Car expense created",
-        {
-            "id": new_id,
-            "date": payload.date.isoformat(),
-            "item": payload.item,
-            "amount": payload.amount,
-        },
     )
 
 
@@ -358,15 +298,10 @@ def get_current_odometer(db: Session = Depends(get_db)):
 @router.get("/odometer/recent")
 def get_recent_odometer_readings(db: Session = Depends(get_db)):
     """Return the 10 most recent odometer readings (newest first). Public."""
-    query = text("""
-        SELECT id, reading_km, reading_date, created_at
-        FROM odometer_readings
-        ORDER BY reading_date DESC, created_at DESC, id DESC
-        LIMIT 10
-    """)
-    rows = db.execute(query).mappings().all()
-
-    return [serialize_row(row) for row in rows]
+    return fetch_recent(
+        db, "odometer_readings", "id, reading_km, reading_date, created_at",
+        order_col="reading_date",
+    )
 
 
 @router.post("/odometer")
@@ -380,21 +315,13 @@ def create_odometer_reading(
     reading_km is the cumulative number shown on the Tesla screen; cost-per-km
     in /stats automatically follows the latest reading.
     """
-    new_id = db.execute(
-        text("""
-            INSERT INTO odometer_readings (reading_km, reading_date)
-            VALUES (:reading_km, :reading_date)
-            RETURNING id
-        """),
-        {"reading_km": payload.reading_km, "reading_date": payload.reading_date},
-    ).scalar_one()
-    db.commit()
-
-    return success_response(
+    return create_record(
+        db,
+        """
+        INSERT INTO odometer_readings (reading_km, reading_date)
+        VALUES (:reading_km, :reading_date)
+        RETURNING id
+        """,
+        payload,
         "Odometer reading created",
-        {
-            "id": new_id,
-            "reading_km": payload.reading_km,
-            "reading_date": payload.reading_date.isoformat(),
-        },
     )

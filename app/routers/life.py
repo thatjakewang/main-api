@@ -2,13 +2,12 @@
 
 Thin HTTP layer: request validation, auth, and plain DB read endpoints.
 All AI summary logic lives in app/services/ai_summary.py; shared serialization,
-response envelopes, and date helpers live in app/utils.py.
+response envelopes, write/recent helpers, and date helpers live in app/utils.py.
 """
 
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -20,13 +19,12 @@ from app.services.ai_summary import (
     build_monthly_expense_summary,
 )
 from app.utils import (
+    create_record,
+    fetch_recent,
     get_month_start,
     get_next_month_start,
     get_today,
-    serialize_row,
-    success_response,
-    summary_or_http_error,
-    summary_to_plain_text,
+    register_ai_summary_pair,
 )
 
 router = APIRouter()
@@ -40,76 +38,29 @@ class DailyExpenseCreate(BaseModel):
     payment_method: str | None = None
 
 
-@router.get("/health")
-def life_health_check():
-    """Simple health check endpoint for the life (daily expenses) router."""
-    return {"status": "life ok"}
-
-
 @router.post("/expenses")
 def create_daily_expense(
     payload: DailyExpenseCreate,
     db: Session = Depends(get_db),
     _: None = Depends(verify_shortcut_api_key),
 ):
-    """Create a new daily expense record (protected by x-api-key).
-
-    Stores the expense in the daily_expenses table and returns the generated id.
-    Requires valid SHORTCUT_API_KEY via the verify dependency.
-    """
-    query = text("""
-        INSERT INTO daily_expenses
-            (date, category, amount, payment_method)
-        VALUES
-            (:date, :category, :amount, :payment_method)
+    """Create a new daily expense record (protected by x-api-key)."""
+    return create_record(
+        db,
+        """
+        INSERT INTO daily_expenses (date, category, amount, payment_method)
+        VALUES (:date, :category, :amount, :payment_method)
         RETURNING id
-    """)
-
-    result = db.execute(
-        query,
-        {
-            "date": payload.date,
-            "category": payload.category,
-            "amount": payload.amount,
-            "payment_method": payload.payment_method,
-        },
-    )
-    db.commit()
-
-    return success_response(
+        """,
+        payload,
         "Daily expense created",
-        {
-            "id": result.scalar_one(),
-            "date": payload.date.isoformat(),
-            "category": payload.category,
-            "amount": payload.amount,
-            "payment_method": payload.payment_method,
-        },
     )
 
 
 @router.get("/expenses/recent")
 def get_recent_daily_expenses(db: Session = Depends(get_db)):
-    """Return the 10 most recent daily expense records (newest first).
-
-    Public endpoint (no API key required). Useful for quick overview on the dashboard.
-    """
-    query = text("""
-        SELECT
-            id,
-            date,
-            category,
-            amount,
-            payment_method,
-            created_at
-        FROM daily_expenses
-        ORDER BY date DESC, created_at DESC
-        LIMIT 10
-    """)
-
-    rows = db.execute(query).mappings().all()
-
-    return [serialize_row(row) for row in rows]
+    """Return the 10 most recent daily expense records (newest first). Public."""
+    return fetch_recent(db, "daily_expenses", "id, date, category, amount, payment_method, created_at")
 
 
 @router.get("/expenses/summary")
@@ -280,59 +231,9 @@ def get_expenses_by_weekday(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/expenses/daily-ai-summary")
-def get_daily_expense_ai_summary(
-    target_date: date | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    """Generate a daily AI expense summary (JSON) for the given (or today's) date.
-
-    Protected endpoint. The "message" field contains the AI-generated English
-    text or a no-record message. AI failures raise HTTP 502.
-    """
-    report_date = target_date or get_today()
-    return summary_or_http_error(build_daily_expense_summary(report_date, db))
-
-
-@router.get("/expenses/daily-ai-summary/message", response_class=PlainTextResponse)
-def get_daily_expense_ai_summary_message(
-    target_date: date | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    """Return only the AI daily summary message as plain text (for iPhone Shortcuts / easy copy).
-
-    Protected endpoint.
-    """
-    report_date = target_date or get_today()
-    return summary_to_plain_text(build_daily_expense_summary(report_date, db))
-
-
-@router.get("/expenses/monthly-ai-summary")
-def get_monthly_expense_ai_summary(
-    target_month: str | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    """Generate a monthly AI expense summary (JSON) for the given (or current) month.
-
-    Protected endpoint. The "message" will be English text produced by the model
-    (or a safe fallback / no-record message). AI failures raise HTTP 502.
-    """
-    month_start = get_month_start(target_month)
-    return summary_or_http_error(build_monthly_expense_summary(month_start, db))
-
-
-@router.get("/expenses/monthly-ai-summary/message", response_class=PlainTextResponse)
-def get_monthly_expense_ai_summary_message(
-    target_month: str | None = None,
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_shortcut_api_key),
-):
-    """Return only the AI monthly summary as plain text (ideal for Shortcuts / iMessage).
-
-    Protected endpoint.
-    """
-    month_start = get_month_start(target_month)
-    return summary_to_plain_text(build_monthly_expense_summary(month_start, db))
+# AI summaries: each call registers the JSON endpoint plus its /message
+# plain-text twin (both protected by x-api-key). See utils.register_ai_summary_pair.
+register_ai_summary_pair(router, "/expenses/daily-ai-summary", build_daily_expense_summary)
+register_ai_summary_pair(
+    router, "/expenses/monthly-ai-summary", build_monthly_expense_summary, by_month=True
+)
