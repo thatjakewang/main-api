@@ -118,48 +118,34 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
     return expense_categories(db, month_start, next_month_start)
 
 
-@router.get("/expenses/monthly")
-def get_monthly_expenses(db: Session = Depends(get_db)):
-    """Return month-by-month spending for the last 12 months, with a
-    per-category breakdown for each month (public).
+@router.get("/expenses/daily")
+def get_daily_expenses(db: Session = Depends(get_db)):
+    """Return daily total spending for the last 90 days (public).
 
-    Covers the current month plus the 11 before it (timezone-aware month
-    boundaries), ordered chronologically. Months with no records are simply
-    absent. Powers the stacked Monthly Spending chart on the MyLife dashboard.
+    Exactly 90 days ending today (timezone-aware via get_today). Days with no
+    expenses are returned with a zero total — generate_series produces the full
+    date range and a LEFT JOIN fills the gaps — so the line chart stays
+    continuous instead of skipping empty days. Powers the Daily Spending chart
+    on the MyLife dashboard.
     """
-    month_start = get_month_start()
-    # First day of the month 11 months before the current one
-    year, month = month_start.year, month_start.month - 11
-    if month <= 0:
-        year, month = year - 1, month + 12
-    start = month_start.replace(year=year, month=month)
+    end = get_today()
+    start = end - timedelta(days=89)
 
     query = text("""
         SELECT
-            TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS month,
-            category,
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COUNT(*) AS record_count
-        FROM daily_expenses
-        WHERE date >= :start
-        GROUP BY DATE_TRUNC('month', date), category
-        ORDER BY DATE_TRUNC('month', date)
+            day::date AS date,
+            COALESCE(SUM(e.amount), 0) AS total_amount
+        FROM generate_series(:start, :end, INTERVAL '1 day') AS day
+        LEFT JOIN daily_expenses e ON e.date = day::date
+        GROUP BY day
+        ORDER BY day
     """)
-    rows = db.execute(query, {"start": start}).mappings().all()
+    rows = db.execute(query, {"start": start, "end": end}).mappings().all()
 
-    # Fold category rows into one entry per month
-    months: dict[str, dict] = {}
-    for row in rows:
-        entry = months.setdefault(
-            row["month"],
-            {"month": row["month"], "total_amount": 0, "record_count": 0, "categories": {}},
-        )
-        amount = int(row["total_amount"] or 0)
-        entry["total_amount"] += amount
-        entry["record_count"] += int(row["record_count"] or 0)
-        entry["categories"][row["category"]] = amount
-
-    return list(months.values())
+    return [
+        {"date": row["date"].isoformat(), "total_amount": int(row["total_amount"] or 0)}
+        for row in rows
+    ]
 
 
 @router.get("/expenses/weekday")
