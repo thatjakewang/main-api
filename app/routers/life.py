@@ -120,16 +120,24 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
 
 @router.get("/expenses/daily")
 def get_daily_expenses(db: Session = Depends(get_db)):
-    """Return daily total spending for the last 90 days (public).
+    """Return daily total spending for the 90 days from the first record (public).
 
-    Exactly 90 days ending today (timezone-aware via get_today). Days with no
-    expenses are returned with a zero total — generate_series produces the full
-    date range and a LEFT JOIN fills the gaps — so the line chart stays
-    continuous instead of skipping empty days. Powers the Daily Spending chart
-    on the MyLife dashboard.
+    The window starts on the earliest daily_expenses date and spans 90 days,
+    capped at today so no empty future days are drawn (timezone-aware via
+    get_today). Days with no expenses are returned with a zero total —
+    generate_series produces the full date range and a LEFT JOIN fills the gaps —
+    so the line chart stays continuous instead of skipping empty days. Falls back
+    to a trailing 90-day window when the table is empty. Powers the Daily Spending
+    chart on the MyLife dashboard.
     """
-    end = get_today()
-    start = end - timedelta(days=89)
+    today = get_today()
+    first = db.execute(text("SELECT MIN(date) FROM daily_expenses")).scalar()
+
+    if first is None:
+        start, end = today - timedelta(days=89), today
+    else:
+        start = first
+        end = min(first + timedelta(days=89), today)
 
     query = text("""
         SELECT
