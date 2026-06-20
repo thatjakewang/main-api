@@ -37,7 +37,6 @@ class DailyExpenseCreate(BaseModel):
     date: date
     category: str
     amount: int = Field(ge=0)
-    payment_method: str | None = None
 
 
 @router.post("/expenses")
@@ -50,8 +49,8 @@ def create_daily_expense(
     return create_record(
         db,
         """
-        INSERT INTO daily_expenses (date, category, amount, payment_method)
-        VALUES (:date, :category, :amount, :payment_method)
+        INSERT INTO daily_expenses (date, category, amount)
+        VALUES (:date, :category, :amount)
         RETURNING id
         """,
         payload,
@@ -62,7 +61,7 @@ def create_daily_expense(
 @router.get("/expenses/recent")
 def get_recent_daily_expenses(db: Session = Depends(get_db)):
     """Return the 10 most recent daily expense records (newest first). Public."""
-    return fetch_recent(db, "daily_expenses", "id, date, category, amount, payment_method")
+    return fetch_recent(db, "daily_expenses", "id, date, category, amount")
 
 
 @router.get("/expenses/summary")

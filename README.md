@@ -60,6 +60,7 @@ These scripts auto-load `DATABASE_URL` from the `.env` in the project root (usin
 ### Applied migrations
 
 - `add_tesla_recent_columns.py` — executed on production (web-01) on 2026-06-03.
+- `drop_payment_method.py` — drops the unused `daily_expenses.payment_method` column. Run after deploying the code that no longer uses it. Not yet executed on production.
 
 On the production server (for future migrations):
 
