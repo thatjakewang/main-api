@@ -8,18 +8,29 @@ deploying the new code (which no longer reads or writes the column).
 
 Idempotent: safe to run more than once (DROP COLUMN IF EXISTS).
 
-Usage (after cd into main-api dir and loading env):
+The script automatically loads DATABASE_URL from the .env file in the project
+root (no need to manually `source .env`, and it works from any directory).
+
+Usage:
+    cd /var/www/main-api
     source .venv/bin/activate
-    source .env
     python migrations/drop_payment_method.py
 """
 import os
 import sys
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 
 def run_migration():
+    # Always load .env from the project root, regardless of the current working
+    # directory (e.g. running from inside migrations/), matching how the app
+    # loads config via pydantic-settings.
+    project_root = Path(__file__).resolve().parent.parent
+    load_dotenv(project_root / ".env")
+
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("❌ ERROR: DATABASE_URL environment variable is not set.")
