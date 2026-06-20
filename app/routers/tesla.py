@@ -230,6 +230,24 @@ def get_monthly_summary(db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/charging/sessions")
+def get_charging_sessions(db: Session = Depends(get_db)):
+    """Return every charging session (date, provider, amount, kWh). Public.
+
+    Unlike /charging/recent (capped at 10), this returns the full history so the
+    frontend can plot the per-session cost distribution (kWh vs. amount scatter).
+    Personal use keeps this table small, so returning every row is fine.
+    """
+    query = text("""
+        SELECT charge_date, provider, amount, kwh
+        FROM charging_records
+        ORDER BY charge_date
+    """)
+    rows = db.execute(query).mappings().all()
+
+    return [serialize_row(row) for row in rows]
+
+
 @router.get("/charging/recent")
 def get_recent_charging_records(db: Session = Depends(get_db)):
     """Return the 10 most recent charging records (newest first). Public."""
