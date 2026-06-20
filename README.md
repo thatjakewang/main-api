@@ -1,7 +1,7 @@
 # Tesla Analytics API
 
-A personal backend that records Tesla charging sessions / car expenses, daily life
-expenses, and workout logs, serving data to a frontend dashboard. Writes come from
+A personal backend that records Tesla charging sessions / car expenses and daily life
+expenses, serving data to a frontend dashboard. Writes come from
 iPhone Shortcuts (protected by an API key).
 
 ## Stack
@@ -20,7 +20,7 @@ app/
   database.py      # engine + per-request session
   dependencies.py  # x-api-key verification
   utils.py         # row serialization, response envelope, date helpers
-  routers/         # thin HTTP route handlers (tesla / life / workout)
+  routers/         # thin HTTP route handlers (tesla / life)
   services/        # business logic (AI expense summaries)
 migrations/        # one-off, idempotent schema scripts
 ```
@@ -90,10 +90,6 @@ You can run the script before or after restarting the API service (the API endpo
 | GET | `/api/life/expenses/recent` | Recent 10 daily expenses (newest first) |
 | GET | `/api/life/expenses/summary` | Current-month total + record count |
 | GET | `/api/life/expenses/category` | Current-month totals grouped by category |
-| GET | `/api/workout/logs/recent` | Recent 10 workout sets (newest first) |
-| GET | `/api/workout/stats` | Current-month workout days / sets / volume |
-| GET | `/api/workout/exercises/prs` | Per-exercise personal records |
-| GET | `/api/workout/volume/monthly` | Monthly training volume trend |
 
 > Note: `charging_records` and `car_expenses` tables were extended with `id` (SERIAL) and `created_at` (for stable recent ordering, matching `daily_expenses`).
 > The `/charging/recent`, `/expenses/recent`, and the two create endpoints are backward-compatible:
@@ -108,7 +104,6 @@ You can run the script before or after restarting the API service (the API endpo
 | POST | `/api/tesla/car-expenses` | Create a car expense |
 | POST | `/api/tesla/odometer` | Log a total-odometer reading |
 | POST | `/api/life/expenses` | Create a daily expense |
-| POST | `/api/workout/logs` | Record one workout set (free-form exercise name) |
 | GET | `/api/life/expenses/daily-ai-summary` | AI daily expense summary (JSON) |
 | GET | `/api/life/expenses/daily-ai-summary/message` | AI daily expense summary (plain text) |
 | GET | `/api/life/expenses/monthly-ai-summary` | AI monthly expense summary (JSON) |
@@ -171,20 +166,6 @@ Response includes `id`:
 
 `reading_date` is optional (defaults to today). Cost-per-km in `/api/tesla/stats`
 automatically follows the latest reading.
-
-### POST `/api/workout/logs`
-
-```json
-{
-  "exercise_name": "Barbell Bench Press",
-  "weight_kg": 60,
-  "reps": 8,
-  "date": "2026-06-09"
-}
-```
-
-`exercise_name` is free-form text (any non-empty name is accepted), so new
-exercises can be added from the iPhone Shortcut without changing the API.
 
 ### GET `/api/life/expenses/monthly-ai-summary`
 
