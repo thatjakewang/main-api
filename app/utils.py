@@ -59,7 +59,7 @@ def create_record(db: Session, insert_sql: str, payload: BaseModel, message: str
     Executes an INSERT ... RETURNING statement (parameters come from the
     payload's fields, so the :placeholders must match the model field names),
     commits, and returns the standard success envelope echoing the generated
-    columns (id, created_at, ...) plus the submitted payload.
+    columns (id, ...) plus the submitted payload.
     """
     fields = payload.model_dump()
     returned = db.execute(text(insert_sql), fields).mappings().one()
@@ -75,14 +75,14 @@ def fetch_recent(db: Session, table: str, columns: str, order_col: str = "date")
     """Return the 10 most recent rows of a table (newest first), JSON-ready.
 
     All /recent endpoints share this exact shape: order by the record's date
-    column, then created_at, then id as tie-breakers. `table` / `columns` /
+    column, then id (SERIAL, so insertion order) as the tie-breaker. `table` / `columns` /
     `order_col` are hardcoded by callers (never user input), so building the
     SQL with an f-string is safe here.
     """
     rows = db.execute(text(f"""
         SELECT {columns}
         FROM {table}
-        ORDER BY {order_col} DESC, created_at DESC, id DESC
+        ORDER BY {order_col} DESC, id DESC
         LIMIT 10
     """)).mappings().all()
 

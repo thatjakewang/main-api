@@ -2,7 +2,7 @@
 
 Public read-only stats endpoints plus protected write endpoints (used by iPhone
 Shortcuts / automation). All monetary values are stored as integers and kWh as
-floats. The id + created_at columns were added in
+floats. The id column (SERIAL, used for stable recent ordering) was added in
 migrations/add_tesla_recent_columns.py (executed on prod 2026-06-03).
 """
 
@@ -48,7 +48,7 @@ def get_latest_odometer(db: Session) -> int:
     reading = db.execute(text("""
         SELECT reading_km
         FROM odometer_readings
-        ORDER BY reading_date DESC, created_at DESC, id DESC
+        ORDER BY reading_date DESC, id DESC
         LIMIT 1
     """)).scalar()
     return int(reading) if reading is not None else settings.tesla_odometer_km
@@ -234,7 +234,7 @@ def get_monthly_summary(db: Session = Depends(get_db)):
 def get_recent_charging_records(db: Session = Depends(get_db)):
     """Return the 10 most recent charging records (newest first). Public."""
     return fetch_recent(
-        db, "charging_records", "id, charge_date, provider, amount, kwh, created_at",
+        db, "charging_records", "id, charge_date, provider, amount, kwh",
         order_col="charge_date",
     )
 
@@ -242,7 +242,7 @@ def get_recent_charging_records(db: Session = Depends(get_db)):
 @router.get("/expenses/recent")
 def get_recent_car_expenses(db: Session = Depends(get_db)):
     """Return the 10 most recent car expense records (newest first). Public."""
-    return fetch_recent(db, "car_expenses", "id, date, item, amount, created_at")
+    return fetch_recent(db, "car_expenses", "id, date, item, amount")
 
 
 @router.post("/charging-records")
@@ -299,7 +299,7 @@ def get_current_odometer(db: Session = Depends(get_db)):
 def get_recent_odometer_readings(db: Session = Depends(get_db)):
     """Return the 10 most recent odometer readings (newest first). Public."""
     return fetch_recent(
-        db, "odometer_readings", "id, reading_km, reading_date, created_at",
+        db, "odometer_readings", "id, reading_km, reading_date",
         order_col="reading_date",
     )
 

@@ -62,7 +62,7 @@ def create_daily_expense(
 @router.get("/expenses/recent")
 def get_recent_daily_expenses(db: Session = Depends(get_db)):
     """Return the 10 most recent daily expense records (newest first). Public."""
-    return fetch_recent(db, "daily_expenses", "id, date, category, amount, payment_method, created_at")
+    return fetch_recent(db, "daily_expenses", "id, date, category, amount, payment_method")
 
 
 @router.get("/expenses/summary")

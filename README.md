@@ -91,10 +91,8 @@ You can run the script before or after restarting the API service (the API endpo
 | GET | `/api/life/expenses/summary` | Current-month total + record count |
 | GET | `/api/life/expenses/category` | Current-month totals grouped by category |
 
-> Note: `charging_records` and `car_expenses` tables were extended with `id` (SERIAL) and `created_at` (for stable recent ordering, matching `daily_expenses`).
-> The `/charging/recent`, `/expenses/recent`, and the two create endpoints are backward-compatible:
-> they work on old schema (id/created_at returned as null) and automatically use the richer data + better
-> ordering once the migration has been applied (no API restart needed after migration).
+> Note: all tables carry an `id` (SERIAL) column. The `/recent` endpoints order by the
+> record's date column then `id DESC`, so rows logged on the same date come back newest-first.
 
 ### Protected (Header: `x-api-key`)
 
