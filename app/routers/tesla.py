@@ -62,23 +62,18 @@ def get_stats(db: Session = Depends(get_db)):
     the latest odometer reading. All queries are simple aggregates over the
     entire history (personal use, tables stay small).
     """
-    expense_query = text("""
-        SELECT COALESCE(SUM(amount), 0) AS car_expense_total
-        FROM car_expenses
-    """)
-    charging_query = text("""
+    totals_query = text("""
         SELECT
-            COALESCE(SUM(amount), 0) AS charging_cost,
-            COALESCE(SUM(kwh), 0) AS energy_kwh
-        FROM charging_records
+            (SELECT COALESCE(SUM(amount), 0) FROM car_expenses) AS car_expense_total,
+            (SELECT COALESCE(SUM(amount), 0) FROM charging_records) AS charging_cost,
+            (SELECT COALESCE(SUM(kwh), 0) FROM charging_records) AS energy_kwh
     """)
 
-    expense = db.execute(expense_query).mappings().one()
-    charging = db.execute(charging_query).mappings().one()
+    totals = db.execute(totals_query).mappings().one()
 
-    car_expense_total = float(expense["car_expense_total"])
-    charging_cost = float(charging["charging_cost"])
-    energy_kwh = float(charging["energy_kwh"])
+    car_expense_total = float(totals["car_expense_total"])
+    charging_cost = float(totals["charging_cost"])
+    energy_kwh = float(totals["energy_kwh"])
 
     total_cost = car_expense_total + charging_cost
     avg_price_per_kwh = round(charging_cost / energy_kwh, 2) if energy_kwh else 0
