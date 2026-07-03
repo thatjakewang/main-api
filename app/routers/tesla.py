@@ -2,8 +2,7 @@
 
 Public read-only stats endpoints plus protected write endpoints (used by iPhone
 Shortcuts / automation). All monetary values are stored as integers and kWh as
-floats. The id column (SERIAL, used for stable recent ordering) was added in
-migrations/add_tesla_recent_columns.py (executed on prod 2026-06-03).
+floats. The id column (SERIAL) provides stable ordering for /recent endpoints.
 """
 
 from datetime import date

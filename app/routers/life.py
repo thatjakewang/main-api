@@ -119,24 +119,22 @@ def get_expenses_by_category(db: Session = Depends(get_db)):
 
 @router.get("/expenses/daily")
 def get_daily_expenses(db: Session = Depends(get_db)):
-    """Return daily total spending for the 90 days from the first record (public).
+    """Return daily total spending for a trailing 90-day window ending today (public).
 
-    The window starts on the earliest daily_expenses date and spans 90 days,
-    capped at today so no empty future days are drawn (timezone-aware via
-    get_today). Days with no expenses are returned with a zero total —
-    generate_series produces the full date range and a LEFT JOIN fills the gaps —
-    so the line chart stays continuous instead of skipping empty days. Falls back
-    to a trailing 90-day window when the table is empty. Powers the Daily Spending
-    chart on the MyLife dashboard.
+    Hybrid window: normally the last 90 days ending today (timezone-aware via
+    get_today), but while the data spans less than 90 days the window starts at
+    the first record instead, so the chart never shows empty leading days.
+    Days with no expenses are returned with a zero total — generate_series
+    produces the full date range and a LEFT JOIN fills the gaps — so the line
+    chart stays continuous instead of skipping empty days. Powers the Daily
+    Spending chart on the MyLife dashboard.
     """
     today = get_today()
     first = db.execute(text("SELECT MIN(date) FROM daily_expenses")).scalar()
 
-    if first is None:
-        start, end = today - timedelta(days=89), today
-    else:
-        start = first
-        end = min(first + timedelta(days=89), today)
+    trailing_start = today - timedelta(days=89)
+    start = max(first, trailing_start) if first else trailing_start
+    end = today
 
     query = text("""
         SELECT
@@ -152,39 +150,6 @@ def get_daily_expenses(db: Session = Depends(get_db)):
     return [
         {"date": row["date"].isoformat(), "total_amount": int(row["total_amount"] or 0)}
         for row in rows
-    ]
-
-
-@router.get("/expenses/weekday")
-def get_expenses_by_weekday(db: Session = Depends(get_db)):
-    """Return average daily spending per weekday over the last 12 weeks (public).
-
-    The window is exactly 84 days ending today, so every weekday occurs
-    exactly 12 times and the averages are directly comparable. All seven
-    weekdays are always returned (zeros included), Monday first.
-    """
-    start = get_today() - timedelta(days=83)
-
-    query = text("""
-        SELECT
-            EXTRACT(ISODOW FROM date)::int AS weekday,
-            COALESCE(SUM(amount), 0) AS total_amount
-        FROM daily_expenses
-        WHERE date >= :start
-        GROUP BY EXTRACT(ISODOW FROM date)
-    """)
-    rows = db.execute(query, {"start": start}).mappings().all()
-    totals = {int(row["weekday"]): int(row["total_amount"] or 0) for row in rows}
-
-    labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    return [
-        {
-            "weekday": dow,
-            "label": labels[dow - 1],
-            "total_amount": totals.get(dow, 0),
-            "avg_amount": round(totals.get(dow, 0) / 12),
-        }
-        for dow in range(1, 8)
     ]
 
 

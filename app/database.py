@@ -1,4 +1,4 @@
-"""Database session management (SQLAlchemy 1.x style).
+"""Database session management (SQLAlchemy 2.x).
 
 A single engine is created at import time. Per-request sessions are provided
 via the get_db dependency. The app uses raw SQL (text()) rather than ORM models
