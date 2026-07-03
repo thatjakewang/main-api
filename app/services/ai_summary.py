@@ -7,6 +7,7 @@ requires new queries + instructions, then a call to _finalize_summary.
 """
 
 import json
+import logging
 from datetime import date, timedelta
 
 from fastapi import HTTPException
@@ -18,6 +19,7 @@ from app.services.expense_stats import expense_categories, expense_daily_totals,
 from app.utils import get_next_month_start
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 DAILY_INSTRUCTIONS = (
@@ -140,6 +142,9 @@ def _finalize_summary(
             max_output_tokens=max_output_tokens,
         )
     except Exception as exc:
+        # Log with traceback so failures are visible in server logs; the caller
+        # still gets a friendly error dict (never an exception).
+        logger.exception("AI summary failed (%s)", label)
         error_message = exc.detail if isinstance(exc, HTTPException) else str(exc)
         return {"status": "error", **label, "error": error_message, "data": data}
 

@@ -4,8 +4,9 @@ Mounts the Tesla and Life routers, configures CORS for the personal website + lo
 and exposes basic health/root endpoints. The real business logic lives in the routers.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.routers import life, tesla
 
@@ -13,6 +14,31 @@ app = FastAPI(
     title="My Tesla Analytics API",
     version="0.1.0",
 )
+
+# Compress JSON responses over 500 bytes (charging/sessions etc. grow over time).
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# How long browsers/proxies may cache public GET responses (seconds).
+# Dashboards tolerate slightly stale data; this cuts repeat DB hits on reloads.
+PUBLIC_CACHE_MAX_AGE = 300
+
+
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    """Add Cache-Control to successful public /api GET responses.
+
+    Requests carrying x-api-key (protected AI endpoints) are skipped so
+    per-user AI summaries are never marked publicly cacheable.
+    """
+    response = await call_next(request)
+    if (
+        request.method == "GET"
+        and request.url.path.startswith("/api")
+        and response.status_code == 200
+        and "x-api-key" not in request.headers
+    ):
+        response.headers.setdefault("Cache-Control", f"public, max-age={PUBLIC_CACHE_MAX_AGE}")
+    return response
 
 # CORS is intentionally narrow (only the real frontend domains + local dev).
 app.add_middleware(

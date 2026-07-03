@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import verify_shortcut_api_key
-from app.utils import create_record, fetch_recent, serialize_row
+from app.utils import create_record, fetch_recent, get_today, serialize_row
 
 router = APIRouter()
 settings = get_settings()
@@ -39,7 +39,9 @@ class CarExpenseCreate(BaseModel):
 class OdometerReadingCreate(BaseModel):
     """Payload for logging a total-odometer reading (the number shown on the car screen)."""
     reading_km: int = Field(ge=0)
-    reading_date: date = Field(default_factory=date.today)
+    # get_today (not date.today) so the default respects APP_TIMEZONE, matching
+    # every other date computation in the app (server clock runs on UTC).
+    reading_date: date = Field(default_factory=get_today)
 
 
 def get_latest_odometer(db: Session) -> int:
