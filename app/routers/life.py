@@ -35,7 +35,7 @@ router = APIRouter()
 class DailyExpenseCreate(BaseModel):
     """Payload used when creating a daily expense via the protected POST /expenses endpoint."""
     date: date
-    category: str
+    category: str = Field(min_length=1, max_length=100)
     amount: int = Field(ge=0)
 
 

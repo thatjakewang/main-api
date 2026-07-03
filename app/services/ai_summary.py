@@ -143,9 +143,14 @@ def _finalize_summary(
         )
     except Exception as exc:
         # Log with traceback so failures are visible in server logs; the caller
-        # still gets a friendly error dict (never an exception).
+        # still gets a friendly error dict (never an exception). Config errors
+        # (our own HTTPExceptions) carry a safe, actionable detail; anything
+        # else gets a generic message so internals never leak to the client.
         logger.exception("AI summary failed (%s)", label)
-        error_message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        error_message = (
+            exc.detail if isinstance(exc, HTTPException)
+            else "AI service error, see server logs"
+        )
         return {"status": "error", **label, "error": error_message, "data": data}
 
     # Use the model's output or a safe English fallback

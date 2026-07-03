@@ -24,7 +24,7 @@ settings = get_settings()
 class ChargingRecordCreate(BaseModel):
     """Payload for creating a charging record (Tesla Supercharger, etc.)."""
     charge_date: date
-    provider: str
+    provider: str = Field(min_length=1, max_length=100)
     amount: int = Field(ge=0)
     kwh: float = Field(ge=0)
 
@@ -32,7 +32,7 @@ class ChargingRecordCreate(BaseModel):
 class CarExpenseCreate(BaseModel):
     """Payload for recording a car-related expense (insurance, maintenance, etc.)."""
     date: date
-    item: str
+    item: str = Field(min_length=1, max_length=100)
     amount: int = Field(ge=0)
 
 

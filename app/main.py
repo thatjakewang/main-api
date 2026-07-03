@@ -13,6 +13,11 @@ from app.routers import life, tesla
 app = FastAPI(
     title="My Tesla Analytics API",
     version="0.1.0",
+    # Hide API docs/schema in production — no need to hand attackers a map
+    # of every endpoint (including the protected ones).
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # Compress JSON responses over 500 bytes (charging/sessions etc. grow over time).
