@@ -67,11 +67,10 @@ def health_check():
 
 @app.get("/")
 def root():
-    """Root endpoint returning basic service info and links to docs/health."""
+    """Root endpoint returning basic service info and a link to the health check."""
     return {
         "status": "ok",
         "service": "tesla-api",
-        "docs": "/docs",
         "health": "/health",
     }
 

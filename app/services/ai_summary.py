@@ -9,6 +9,7 @@ requires new queries + instructions, then a call to _finalize_summary.
 import json
 import logging
 from datetime import date, timedelta
+from functools import lru_cache
 
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -97,11 +98,15 @@ def get_monthly_budget_context(total_amount: int) -> dict:
     }
 
 
+@lru_cache
 def create_openai_client():
-    """Create and return an authenticated OpenAI client.
+    """Return the shared authenticated OpenAI client (created once per process).
 
-    Raises HTTP 500 if OPENAI_API_KEY is missing or the openai package is not installed.
-    The client is used for the Responses API (instructions + input style).
+    Raises HTTP 500 if OPENAI_API_KEY is missing or the openai package is not
+    installed; failures are not cached, so a later call retries. The timeout
+    bounds how long a hung OpenAI request can hold a threadpool thread (and its
+    request's DB connection). The client is used for the Responses API
+    (instructions + input style).
     """
     if not settings.openai_api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
@@ -111,7 +116,7 @@ def create_openai_client():
     except ImportError as exc:
         raise HTTPException(status_code=500, detail="openai package is not installed") from exc
 
-    return OpenAI(api_key=settings.openai_api_key)
+    return OpenAI(api_key=settings.openai_api_key, timeout=30.0)
 
 
 def _finalize_summary(

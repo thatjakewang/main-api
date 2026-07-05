@@ -88,21 +88,13 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
         get_next_month_start(prev_month_start),
     )
 
-    prev_query = text("""
-        SELECT COALESCE(SUM(amount), 0) AS total_amount
-        FROM daily_expenses
-        WHERE date >= :start
-          AND date < :end
-    """)
-    prev_total = db.execute(
-        prev_query, {"start": prev_month_start, "end": prev_period_end}
-    ).scalar()
+    prev_totals = expense_totals(db, prev_month_start, prev_period_end)
 
     return {
         "month": month_label,
         "total_amount": totals["total_amount"],
         "record_count": totals["record_count"],
-        "prev_month_to_date": int(prev_total or 0),
+        "prev_month_to_date": prev_totals["total_amount"],
     }
 
 
