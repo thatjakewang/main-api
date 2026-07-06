@@ -120,6 +120,7 @@ def create_openai_client():
 
 
 def _finalize_summary(
+    db: Session,
     label: dict,
     data: dict,
     record_count: int,
@@ -135,6 +136,10 @@ def _finalize_summary(
     or {"month": "2026-06"}. Errors are returned as a dict with status "error"
     (never raised), so the plain-text endpoints can render them safely.
     """
+    # All DB work is done by now; return the connection to the pool before the
+    # OpenAI call (up to 30s) so slow AI responses can't starve the pool.
+    db.close()
+
     # Short-circuit with a friendly message if nothing was recorded in the period
     if record_count == 0:
         return {"status": "success", **label, "message": empty_message, "data": data}
@@ -248,6 +253,7 @@ def build_daily_expense_summary(report_date: date, db: Session) -> dict:
     }
 
     return _finalize_summary(
+        db,
         label={"date": report_date.isoformat()},
         data=data,
         record_count=record_count,
@@ -293,6 +299,7 @@ def build_monthly_expense_summary(month_start: date, db: Session) -> dict:
     }
 
     return _finalize_summary(
+        db,
         label={"month": month_label},
         data=data,
         record_count=record_count,

@@ -43,13 +43,26 @@ TESLA_ODOMETER_KM=21471
 ## Setup & Run
 
 ```bash
-python -m venv .venv
+python -m venv .venv          # Python version pinned in .python-version (3.14)
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.lock   # fully pinned; use requirements.txt for top-level only
 uvicorn app.main:app --reload
 ```
 
 API docs available at http://localhost:8000/docs after startup.
+
+Dependencies: `requirements.txt` lists top-level packages; `requirements.lock` is the
+fully pinned set generated with `uv pip compile requirements.txt -o requirements.lock`.
+Re-generate the lock after changing `requirements.txt`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/
+```
+
+Tests never touch a real database or OpenAI — DB sessions and the AI client are faked.
 
 ## Database Migrations (one-off scripts)
 
@@ -78,7 +91,7 @@ You can run the script before or after restarting the API service (the API endpo
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
+| GET | `/health` | Health check (pings the DB; 503 if unreachable) |
 | GET | `/api/tesla/stats` | Total cost, charging cost, cost per km |
 | GET | `/api/tesla/expenses` | Car expenses grouped by item |
 | GET | `/api/tesla/expenses/recent` | Recent 10 car expenses (newest first) |
@@ -87,13 +100,16 @@ You can run the script before or after restarting the API service (the API endpo
 | GET | `/api/tesla/charging/recent` | Recent 10 charging records (newest first) |
 | GET | `/api/tesla/odometer/current` | Latest known odometer reading (km) |
 | GET | `/api/tesla/odometer/recent` | Recent 10 odometer readings (newest first) |
-| GET | `/api/life/health` | Life router health check |
 | GET | `/api/life/expenses/recent` | Recent 10 daily expenses (newest first) |
 | GET | `/api/life/expenses/summary` | Current-month total + record count |
 | GET | `/api/life/expenses/category` | Current-month totals grouped by category |
 
 > Note: all tables carry an `id` (SERIAL) column. The `/recent` endpoints order by the
 > record's date column then `id DESC`, so rows logged on the same date come back newest-first.
+
+> Rate limiting: every endpoint except `/health` is capped at 120 requests/minute per
+> client IP (in-memory, via slowapi). Behind a reverse proxy, run uvicorn with
+> `--proxy-headers` (and `--forwarded-allow-ips`) so the real client IP is used.
 
 ### Protected (Header: `x-api-key`)
 

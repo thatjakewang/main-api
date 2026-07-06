@@ -4,10 +4,18 @@ Mounts the Tesla and Life routers, configures CORS for the personal website + lo
 and exposes basic health/root endpoints. The real business logic lives in the routers.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from app.database import get_db
 from app.routers import life, tesla
 
 app = FastAPI(
@@ -22,6 +30,19 @@ app = FastAPI(
 
 # Compress JSON responses over 500 bytes (charging/sessions etc. grow over time).
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# Rate limiting: per-client-IP cap on every endpoint (in-memory storage — fine for
+# a single-process deployment). /health is exempt so monitors are never throttled.
+# Note: if the app sits behind a reverse proxy, uvicorn needs --proxy-headers (and
+# --forwarded-allow-ips) so get_remote_address sees the real client IP.
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["120/minute"],
+    headers_enabled=True,
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # How long browsers/proxies may cache public GET responses (seconds).
 # Dashboards tolerate slightly stale data; this cuts repeat DB hits on reloads.
@@ -60,9 +81,21 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health_check():
-    """Basic health check for the entire API (used by load balancers, monitors, etc.)."""
-    return {"status": "ok"}
+@limiter.exempt
+def health_check(db: Session = Depends(get_db)):
+    """Health check for the entire API (used by load balancers, monitors, etc.).
+
+    Pings the database with SELECT 1 so a dead DB shows up as 503 instead of a
+    green health check in front of a broken service.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "database": "unreachable"},
+        )
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/")
