@@ -49,7 +49,9 @@ class FakeSession:
     """A DB session double: returns canned rows, records close/rollback calls.
 
     `results` (a list of FakeResult) makes consecutive execute() calls return
-    different result sets, for endpoints that run several queries.
+    different result sets, for endpoints that run several queries. Every
+    execute()'s positional args land in `calls`, so tests can assert the
+    parameters bound to each query (calls[i][1] is the params dict, if any).
     """
 
     def __init__(self, rows=None, scalar_value=None, execute_error=None, results=None):
@@ -58,8 +60,10 @@ class FakeSession:
         self.execute_error = execute_error
         self.results = list(results) if results else None
         self.closed = False
+        self.calls = []
 
     def execute(self, *args, **kwargs):
+        self.calls.append(args)
         if self.execute_error is not None:
             raise self.execute_error
         if self.results is not None:
@@ -88,4 +92,16 @@ def client(fake_db):
     app.dependency_overrides[get_db] = lambda: fake_db
     with TestClient(app) as test_client:
         yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_for():
+    """Factory: build a TestClient whose get_db yields the given fake session."""
+
+    def factory(session: FakeSession) -> TestClient:
+        app.dependency_overrides[get_db] = lambda: session
+        return TestClient(app)
+
+    yield factory
     app.dependency_overrides.clear()

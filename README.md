@@ -22,7 +22,8 @@ app/
   utils.py         # row serialization, response envelope, date helpers
   routers/         # thin HTTP route handlers (tesla / life)
   services/        # business logic (AI expense summaries)
-migrations/        # one-off, idempotent schema scripts
+tests/             # pytest suite (no real DB / no real OpenAI calls)
+schema.sql         # reference DDL for rebuilding the database
 ```
 
 ## Environment Variables
@@ -63,27 +64,33 @@ python -m pytest tests/
 ```
 
 Tests never touch a real database or OpenAI — DB sessions and the AI client are faked.
+GitHub Actions (`.github/workflows/ci.yml`) runs the suite on every push and pull request.
 
-## Database Migrations (one-off scripts)
+## Database Schema & Migrations
 
-Some schema changes are delivered as standalone scripts in `migrations/`.
-
-These scripts auto-load `DATABASE_URL` from the `.env` in the project root (using `python-dotenv`).
-
-### Applied migrations
-
-- `add_tesla_recent_columns.py` — executed on production (web-01) on 2026-06-03.
-- `drop_payment_method.py` — drops the unused `daily_expenses.payment_method` column. Run after deploying the code that no longer uses it. Not yet executed on production.
-
-On the production server (for future migrations):
+`schema.sql` is the reference DDL for every table the API uses. Rebuild an empty
+database with:
 
 ```bash
-cd /var/www/main-api
-source .venv/bin/activate
-python migrations/<script_name>.py
+psql "$DATABASE_URL" -f schema.sql
 ```
 
-You can run the script before or after restarting the API service (the API endpoints are backward-compatible).
+Schema changes are delivered as one-off idempotent scripts in `migrations/`
+(they auto-load `DATABASE_URL` from the project-root `.env` via `python-dotenv`).
+The workflow:
+
+1. Deploy code that works with both the old and the new schema.
+2. Run the script on the production server:
+
+   ```bash
+   cd /var/www/main-api
+   source .venv/bin/activate
+   python migrations/<script_name>.py
+   ```
+
+3. Update `schema.sql` to match, then delete the script — git history keeps the
+   record. Applied so far: `add_tesla_recent_columns.py` (2026-06-03),
+   `add_odometer_readings.py` (2026-06), `drop_payment_method.py` (by 2026-06-28).
 
 ## Endpoints
 
@@ -93,16 +100,19 @@ You can run the script before or after restarting the API service (the API endpo
 |--------|------|-------------|
 | GET | `/health` | Health check (pings the DB; 503 if unreachable) |
 | GET | `/api/tesla/stats` | Total cost, charging cost, cost per km |
+| GET | `/api/tesla/monthly-summary` | Month-by-month cost & efficiency (km driven, cost/km, kWh/100km) |
 | GET | `/api/tesla/expenses` | Car expenses grouped by item |
 | GET | `/api/tesla/expenses/recent` | Recent 10 car expenses (newest first) |
 | GET | `/api/tesla/charging/providers` | Charging cost grouped by provider |
 | GET | `/api/tesla/charging/monthly-trend` | Monthly charging trend |
+| GET | `/api/tesla/charging/sessions` | Full charging history (per-session cost distribution) |
 | GET | `/api/tesla/charging/recent` | Recent 10 charging records (newest first) |
 | GET | `/api/tesla/odometer/current` | Latest known odometer reading (km) |
 | GET | `/api/tesla/odometer/recent` | Recent 10 odometer readings (newest first) |
 | GET | `/api/life/expenses/recent` | Recent 10 daily expenses (newest first) |
-| GET | `/api/life/expenses/summary` | Current-month total + record count |
+| GET | `/api/life/expenses/summary` | Current-month total + count + prev-month same-period total |
 | GET | `/api/life/expenses/category` | Current-month totals grouped by category |
+| GET | `/api/life/expenses/daily` | Daily totals, trailing 90-day window (zero-filled) |
 
 > Note: all tables carry an `id` (SERIAL) column. The `/recent` endpoints order by the
 > record's date column then `id DESC`, so rows logged on the same date come back newest-first.

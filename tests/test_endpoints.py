@@ -3,24 +3,7 @@
 All DB access goes through FakeSession — no real database is involved.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-
-from app.database import get_db
-from app.main import app
 from tests.conftest import TEST_API_KEY, FakeResult, FakeSession
-
-
-@pytest.fixture
-def client_for():
-    """Factory: build a TestClient whose get_db yields the given fake session."""
-
-    def factory(session: FakeSession) -> TestClient:
-        app.dependency_overrides[get_db] = lambda: session
-        return TestClient(app)
-
-    yield factory
-    app.dependency_overrides.clear()
 
 
 class TestHealth:
