@@ -3,6 +3,7 @@
 All DB access goes through FakeSession — no real database is involved.
 """
 
+from app.main import PUBLIC_CACHE_MAX_AGE
 from tests.conftest import TEST_API_KEY, FakeResult, FakeSession
 
 
@@ -75,7 +76,10 @@ class TestCacheHeaders:
         response = client.get("/api/life/expenses/recent")
         assert response.status_code == 200
         assert response.json() == []
-        assert response.headers["Cache-Control"] == "public, max-age=300"
+        assert (
+            response.headers["Cache-Control"]
+            == f"public, max-age={PUBLIC_CACHE_MAX_AGE}"
+        )
 
     def test_health_is_not_cacheable(self, client):
         response = client.get("/health")

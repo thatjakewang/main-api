@@ -45,8 +45,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # How long browsers/proxies may cache public GET responses (seconds).
-# Dashboards tolerate slightly stale data; this cuts repeat DB hits on reloads.
-PUBLIC_CACHE_MAX_AGE = 300
+# Kept short: entries added via iPhone Shortcuts should show up on the
+# dashboards right away — the browser cache can't be invalidated remotely,
+# so this window is the maximum staleness. Still absorbs reload bursts.
+PUBLIC_CACHE_MAX_AGE = 30
 
 
 @app.middleware("http")
