@@ -60,6 +60,7 @@ class FakeSession:
         self.execute_error = execute_error
         self.results = list(results) if results else None
         self.closed = False
+        self.rolled_back = False
         self.calls = []
 
     def execute(self, *args, **kwargs):
@@ -74,7 +75,7 @@ class FakeSession:
         pass
 
     def rollback(self):
-        pass
+        self.rolled_back = True
 
     def close(self):
         self.closed = True

@@ -43,6 +43,17 @@ class TestDateHelpers:
         assert month_start.day == 1
         assert get_next_month_start(month_start) == next_month_start
 
+    def test_get_today_survives_invalid_timezone(self, monkeypatch):
+        from zoneinfo import ZoneInfo
+
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "app_timezone", "Not/AZone")
+        before = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        result = get_today()  # must fall back to Asia/Taipei, not raise
+        after = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        assert result in {before, after}
+
 
 class TestSerialization:
     @pytest.mark.parametrize(

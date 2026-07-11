@@ -6,12 +6,13 @@ summary endpoints are covered by test_endpoints.py / test_ai_summary.py.
 """
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from app import utils
 from app.routers import life
-from tests.conftest import FakeResult, FakeSession
+from tests.conftest import TEST_API_KEY, FakeResult, FakeSession
 
 
 @pytest.fixture
@@ -83,3 +84,45 @@ class TestDailySeriesWindow:
         session = FakeSession(results=[FakeResult(scalar_value=None), FakeResult(rows=[])])
         assert client_for(session).get("/api/life/expenses/daily").json() == []
         assert session.calls[1][1] == {"start": date(2026, 4, 12), "end": date(2026, 7, 10)}
+
+
+class TestWrites:
+    def test_create_daily_expense_envelope(self, client_for):
+        session = FakeSession(results=[FakeResult(rows=[{"id": 42}])])
+        response = client_for(session).post(
+            "/api/life/expenses",
+            headers={"x-api-key": TEST_API_KEY},
+            json={"date": "2026-07-06", "category": "Food", "amount": 120},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "success",
+            "message": "Daily expense created",
+            "data": {"id": 42, "date": "2026-07-06", "category": "Food", "amount": 120},
+        }
+
+
+class TestCategoryEndpoint:
+    def test_current_month_bounds_and_row_shape(self, client_for, fixed_today):
+        fixed_today(date(2026, 7, 10))
+        # Postgres SUM comes back as Decimal; expense_categories must emit ints.
+        session = FakeSession(rows=[
+            {"category": "Food", "total_amount": Decimal("4500"), "record_count": 15},
+        ])
+        body = client_for(session).get("/api/life/expenses/category").json()
+
+        assert body == [{"category": "Food", "total_amount": 4500, "record_count": 15}]
+        assert session.calls[0][1] == {
+            "month_start": date(2026, 7, 1), "next_month_start": date(2026, 8, 1),
+        }
+
+
+class TestRecentEndpoint:
+    def test_rows_are_serialized(self, client_for):
+        session = FakeSession(rows=[
+            {"id": 2, "date": date(2026, 7, 6), "category": "Food", "amount": 120},
+        ])
+        body = client_for(session).get("/api/life/expenses/recent").json()
+        assert body == [
+            {"id": 2, "date": "2026-07-06", "category": "Food", "amount": 120},
+        ]

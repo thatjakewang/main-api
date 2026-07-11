@@ -4,7 +4,13 @@ The interesting logic is pure-Python post-processing (odometer deltas, derived
 per-km metrics); FakeSession supplies the query results in call order.
 """
 
+from datetime import date
+from decimal import Decimal
+
+import pytest
+
 from app.routers import tesla
+from app.utils import get_today
 from tests.conftest import TEST_API_KEY, FakeResult, FakeSession
 
 
@@ -103,3 +109,83 @@ class TestWrites:
             json={"charge_date": "2026-07-01", "provider": "x", "amount": -1, "kwh": 1},
         )
         assert response.status_code == 422
+
+    def test_create_car_expense_envelope(self, client_for):
+        session = FakeSession(results=[FakeResult(rows=[{"id": 3}])])
+        response = client_for(session).post(
+            "/api/tesla/car-expenses",
+            headers={"x-api-key": TEST_API_KEY},
+            json={"date": "2026-07-01", "item": "Tires", "amount": 8000},
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == {
+            "id": 3, "date": "2026-07-01", "item": "Tires", "amount": 8000,
+        }
+
+    def test_odometer_reading_date_defaults_to_app_timezone_today(self, client_for):
+        session = FakeSession(results=[FakeResult(rows=[{"id": 9}])])
+        before = get_today()
+        response = client_for(session).post(
+            "/api/tesla/odometer",
+            headers={"x-api-key": TEST_API_KEY},
+            json={"reading_km": 24500},
+        )
+        after = get_today()
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["id"] == 9
+        assert data["reading_km"] == 24500
+        # before/after so a run that crosses midnight can't flake
+        assert data["reading_date"] in {before.isoformat(), after.isoformat()}
+
+
+class TestReadEndpoints:
+    """The read endpoints share the query -> serialize_row pipeline. The
+    parametrized check catches route-level wiring errors; the shape tests pin
+    serialization of real DB types (Decimal, date) through each query shape."""
+
+    @pytest.mark.parametrize("path", [
+        "/api/tesla/expenses",
+        "/api/tesla/charging/providers",
+        "/api/tesla/charging/monthly-trend",
+        "/api/tesla/charging/sessions",
+        "/api/tesla/charging/recent",
+        "/api/tesla/expenses/recent",
+        "/api/tesla/odometer/recent",
+    ])
+    def test_read_endpoints_respond_with_lists(self, client, path):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_providers_serialize_db_decimals(self, client_for):
+        # Postgres SUM/aggregates come back as Decimal, never int/float.
+        session = FakeSession(rows=[{
+            "provider": "Supercharger",
+            "total_kwh": Decimal("240.50"),
+            "total_amount": Decimal("1200"),
+            "avg_price_per_kwh": Decimal("4.9896"),
+        }])
+        body = client_for(session).get("/api/tesla/charging/providers").json()
+        assert body == [{
+            "provider": "Supercharger",
+            "total_kwh": 240.5,
+            "total_amount": 1200,       # integral Decimal -> int
+            "avg_price_per_kwh": 4.99,  # rounded to 2 decimals
+        }]
+
+    def test_sessions_serialize_dates(self, client_for):
+        session = FakeSession(rows=[
+            {"charge_date": date(2026, 7, 1), "provider": "Home", "amount": 90, "kwh": 22.0},
+        ])
+        body = client_for(session).get("/api/tesla/charging/sessions").json()
+        assert body == [
+            {"charge_date": "2026-07-01", "provider": "Home", "amount": 90, "kwh": 22.0},
+        ]
+
+    def test_odometer_current_returns_latest_reading(self, client_for):
+        body = client_for(FakeSession(scalar_value=24123)).get(
+            "/api/tesla/odometer/current"
+        ).json()
+        assert body == {"odometer_km": 24123}

@@ -1,7 +1,11 @@
-"""HTTP-level tests: health, auth behavior, cache headers, rate limiting.
+"""HTTP-level tests: health, auth, cache headers, CORS, gzip, rate limiting.
 
 All DB access goes through FakeSession — no real database is involved.
+TestRateLimit stays last in the file: it deliberately exhausts the per-path
+budget for "/", and the limiter's in-memory window spans the whole test run.
 """
+
+from datetime import date
 
 from app.main import PUBLIC_CACHE_MAX_AGE
 from tests.conftest import TEST_API_KEY, FakeResult, FakeSession
@@ -97,6 +101,99 @@ class TestCacheHeaders:
         )
         assert response.status_code == 200
         assert "Cache-Control" not in response.headers
+
+    def test_error_responses_are_not_cacheable(self, client):
+        response = client.get("/api/life/nope")
+        assert response.status_code == 404
+        assert "Cache-Control" not in response.headers
+
+
+class TestMonthlyAISummary:
+    """Endpoint-level coverage of register_ai_summary_pair's by_month branch."""
+
+    def make_session(self):
+        # Three queries: totals (one), categories (all), daily totals (all).
+        return FakeSession(results=[
+            FakeResult(rows=[{"total_amount": 0, "record_count": 0}]),
+            FakeResult(rows=[]),
+            FakeResult(rows=[]),
+        ])
+
+    def test_empty_month_short_circuits(self, client_for):
+        session = self.make_session()
+        response = client_for(session).get(
+            "/api/life/expenses/monthly-ai-summary?target_month=2026-06",
+            headers={"x-api-key": TEST_API_KEY},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["month"] == "2026-06"
+        assert body["message"] == "No expenses recorded this month."
+        assert "budget" in body["data"]
+        # target_month drives the queried range, not today's month
+        assert session.calls[0][1] == {
+            "month_start": date(2026, 6, 1), "next_month_start": date(2026, 7, 1),
+        }
+
+    def test_bad_target_month_is_422(self, client):
+        response = client.get(
+            "/api/life/expenses/monthly-ai-summary?target_month=2026-13",
+            headers={"x-api-key": TEST_API_KEY},
+        )
+        assert response.status_code == 422
+        assert "YYYY-MM" in response.json()["detail"]
+
+    def test_message_twin_also_validates_month(self, client):
+        response = client.get(
+            "/api/life/expenses/monthly-ai-summary/message?target_month=nope",
+            headers={"x-api-key": TEST_API_KEY},
+        )
+        assert response.status_code == 422
+
+
+class TestCORS:
+    """The allowlist is the whole CORS policy — pin both directions.
+
+    Uses /health (limiter-exempt) so these can never eat rate-limit budget.
+    """
+
+    def test_frontend_origin_is_allowed(self, client):
+        response = client.get("/health", headers={"origin": "https://jakewang.dev"})
+        assert response.headers["access-control-allow-origin"] == "https://jakewang.dev"
+
+    def test_unknown_origin_gets_no_cors_headers(self, client):
+        response = client.get("/health", headers={"origin": "https://evil.example"})
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_preflight_from_frontend_is_accepted(self, client):
+        response = client.options("/api/tesla/stats", headers={
+            "origin": "https://www.jakewang.dev",
+            "access-control-request-method": "GET",
+        })
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"] == "https://www.jakewang.dev"
+        )
+
+
+class TestGZip:
+    def test_large_responses_are_compressed(self, client_for):
+        rows = [
+            {"charge_date": date(2026, 1, 1), "provider": "Supercharger",
+             "amount": 100, "kwh": 20.5},
+        ] * 40  # well past the 500-byte minimum
+        client = client_for(FakeSession(rows=rows))
+        response = client.get(
+            "/api/tesla/charging/sessions", headers={"accept-encoding": "gzip"}
+        )
+        assert response.headers.get("content-encoding") == "gzip"
+        assert len(response.json()) == 40  # httpx transparently decompresses
+
+    def test_small_responses_stay_uncompressed(self, client):
+        response = client.get(
+            "/api/life/expenses/recent", headers={"accept-encoding": "gzip"}
+        )
+        assert "content-encoding" not in response.headers
 
 
 class TestRateLimit:
