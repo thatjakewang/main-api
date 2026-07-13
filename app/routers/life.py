@@ -6,6 +6,7 @@ response envelopes, write/recent helpers, and date helpers live in app/utils.py.
 """
 
 from datetime import date, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -18,7 +19,11 @@ from app.services.ai_summary import (
     build_daily_expense_summary,
     build_monthly_expense_summary,
 )
-from app.services.expense_stats import expense_categories, expense_totals
+from app.services.expense_stats import (
+    expense_categories,
+    expense_category_monthly,
+    expense_totals,
+)
 from app.utils import (
     create_record,
     current_month_range,
@@ -99,14 +104,37 @@ def get_daily_expense_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/expenses/category")
-def get_expenses_by_category(db: Session = Depends(get_db)):
-    """Return current-month expenses grouped by category (highest total first).
+def get_expenses_by_category(
+    scope: Literal["month", "all"] = "month",
+    db: Session = Depends(get_db),
+):
+    """Return expenses grouped by category (highest total first). Public.
 
-    Public endpoint. Uses timezone-aware month boundaries for consistency with
-    other summary endpoints.
+    scope=month (default) covers the current month using timezone-aware
+    boundaries, consistent with the other summary endpoints; scope=all drops
+    the date filter for the all-time breakdown.
     """
+    if scope == "all":
+        return expense_categories(db)
     month_start, next_month_start = current_month_range()
     return expense_categories(db, month_start, next_month_start)
+
+
+@router.get("/expenses/category/monthly")
+def get_expenses_category_monthly(db: Session = Depends(get_db)):
+    """Return per-category totals for each of the last 12 calendar months. Public.
+
+    The window covers the current month plus the 11 before it (timezone-aware),
+    so the stacked trend chart always shows a full year of context. Months and
+    categories with no records are simply absent — the frontend fills gaps.
+    """
+    month_start = get_month_start()
+    year = month_start.year
+    month = month_start.month - 11
+    if month < 1:
+        month += 12
+        year -= 1
+    return expense_category_monthly(db, date(year, month, 1))
 
 
 @router.get("/expenses/daily")

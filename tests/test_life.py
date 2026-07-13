@@ -117,6 +117,54 @@ class TestCategoryEndpoint:
         }
 
 
+class TestCategoryAllTimeScope:
+    def test_scope_all_drops_date_filter(self, client_for):
+        session = FakeSession(rows=[
+            {"category": "Food", "total_amount": Decimal("98000"), "record_count": 400},
+        ])
+        body = client_for(session).get("/api/life/expenses/category?scope=all").json()
+
+        assert body == [{"category": "Food", "total_amount": 98000, "record_count": 400}]
+        # no date bounds are bound to the query
+        assert session.calls[0][1] == {}
+        assert "WHERE" not in str(session.calls[0][0])
+
+    def test_invalid_scope_is_rejected(self, client_for):
+        response = client_for(FakeSession(rows=[])).get(
+            "/api/life/expenses/category?scope=year"
+        )
+        assert response.status_code == 422
+
+
+class TestCategoryMonthlyEndpoint:
+    def test_window_starts_12_months_back_and_rows_serialize(self, client_for, fixed_today):
+        fixed_today(date(2026, 7, 10))
+        session = FakeSession(rows=[
+            {"month": "2026-06", "category": "Food", "total_amount": Decimal("4500")},
+            {"month": "2026-07", "category": "Drinks", "total_amount": Decimal("800")},
+        ])
+        body = client_for(session).get("/api/life/expenses/category/monthly").json()
+
+        assert body == [
+            {"month": "2026-06", "category": "Food", "total_amount": 4500},
+            {"month": "2026-07", "category": "Drinks", "total_amount": 800},
+        ]
+        # current month (2026-07) plus the 11 before it -> starts 2025-08-01
+        assert session.calls[0][1] == {"start": date(2025, 8, 1)}
+
+    def test_window_handles_year_rollover(self, client_for, fixed_today):
+        fixed_today(date(2026, 12, 5))  # month - 11 = 1, no rollover needed
+        session = FakeSession(rows=[])
+        client_for(session).get("/api/life/expenses/category/monthly")
+        assert session.calls[0][1] == {"start": date(2026, 1, 1)}
+
+    def test_window_rolls_back_into_previous_year(self, client_for, fixed_today):
+        fixed_today(date(2026, 3, 15))
+        session = FakeSession(rows=[])
+        client_for(session).get("/api/life/expenses/category/monthly")
+        assert session.calls[0][1] == {"start": date(2025, 4, 1)}
+
+
 class TestRecentEndpoint:
     def test_rows_are_serialized(self, client_for):
         session = FakeSession(rows=[
